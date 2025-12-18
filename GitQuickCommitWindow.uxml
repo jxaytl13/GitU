@@ -1,4 +1,4 @@
-﻿<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements" editor-extension-mode="False">
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements" editor-extension-mode="False">
     <ui:VisualElement name="rootContainer" class="root-container" style="flex-grow: 1; justify-content: space-between; width: auto; height: auto; padding-top: 5px; padding-right: 5px; padding-bottom: 5px; padding-left: 5px;">
         <ui:VisualElement style="flex-grow: 1; width: 100%; height: 100%;">
             <ui:VisualElement name="headerCard" class="card mb-4" style="height: 80px; justify-content: space-between; width: 100%;">
@@ -6,25 +6,25 @@
                     <uie:ObjectField name="targetField" label="目标资源" class="flex-grow-field" style="flex-grow: 1;" />
                     <ui:Button name="clearExcludeButton" text="清除排除" style="display: flex; width: 100px; flex-shrink: 0; flex-grow: 0;" />
                 </ui:VisualElement>
-                <ui:Label name="pathLabel" class="secondary-text" />
-                <ui:Label name="operationHintLabel" text="提示：单击文件名定位，双击复制文件名；双击路径复制全路径。" class="hint-text" />
+                <ui:Label name="pathLabel" class="secondary-text" style="flex-shrink: 1; height: 20px; margin-top: 10px;" />
+                <ui:Label name="operationHintLabel" text="提示：单击文件名定位，双击复制文件名；双击路径复制全路径。" class="hint-text" style="flex-shrink: 1; height: 20px;" />
                 <ui:Label name="statusLabel" />
             </ui:VisualElement>
             <ui:VisualElement name="filterBox" class="card mb-4" style="width: 100%; height: auto;">
-                <ui:Label name="filterTitle" text="条件筛选" class="title-text" />
+                <ui:Label name="filterTitle" text="条件筛选" class="title-text" style="flex-shrink: 1; height: 20px; margin-top: 10px;" />
                 <ui:VisualElement name="typeRow" class="row space-between" style="flex-direction: row; justify-content: space-between;">
                     <ui:VisualElement name="typeGroup" class="row type-group" style="flex-direction: row; align-items: center; justify-content: space-between; flex-grow: 0;">
                         <ui:VisualElement name="addedContainer" class="row type-container type-added" style="flex-direction: row; width: auto; margin-right: 16px;">
                             <ui:Toggle name="toggleAdded" style="align-items: stretch; margin-right: 8px;" />
-                            <ui:Label text="新增" class="type-label type-added-label" style="color: #80D980;" />
+                            <ui:Label text="新增" class="type-label type-added-label" style="color: rgb(128, 217, 128);" />
                         </ui:VisualElement>
                         <ui:VisualElement name="modifiedContainer" class="row type-container type-modified" style="flex-direction: row; margin-right: 20px;">
                             <ui:Toggle name="toggleModified" style="margin-right: 8px;" />
-                            <ui:Label text="修改" class="type-label type-modified-label" style="color: #F2BF66;" />
+                            <ui:Label text="修改" class="type-label type-modified-label" style="color: rgb(242, 191, 102);" />
                         </ui:VisualElement>
                         <ui:VisualElement name="deletedContainer" class="row type-container" style="flex-direction: row; margin-bottom: 0; margin-right: 20px;">
                             <ui:Toggle name="toggleDeleted" style="margin-right: 8px;" />
-                            <ui:Label text="删除" class="type-label type-deleted-label" style="color: #E68080;" />
+                            <ui:Label text="删除" class="type-label type-deleted-label" style="color: rgb(230, 128, 128);" />
                         </ui:VisualElement>
                     </ui:VisualElement>
                     <ui:VisualElement name="presetContainer" class="row preset-container" style="flex-direction: row; justify-content: flex-end;">
@@ -32,21 +32,21 @@
                         <ui:DropdownField name="timePresetField" class="dropdown-preset" style="width: 100px;" />
                     </ui:VisualElement>
                 </ui:VisualElement>
-                <ui:Label name="timeRangeLabel" text="时间范围 (格式: yyyy-MM-dd HH:mm)" class="time-range-label" style="padding-right: 0;" />
-            <ui:VisualElement name="timeRow" class="row time-row" style="flex-direction: row; justify-content: space-between;">
-                <ui:VisualElement name="startRow" class="start-row" style="flex-grow: 1;">
-                    <ui:TextField name="startTimeField" label="开始" class="text-field-grow" />
-                    <ui:TextField name="endTimeField" label="结束" class="text-field-grow" />
+                <ui:Label name="timeRangeLabel" text="时间范围 (格式: yyyy-MM-dd HH:mm)" class="time-range-label" style="padding-right: 0; flex-shrink: 1; height: 20px; margin-top: 10px;" />
+                <ui:VisualElement name="timeRow" class="row time-row" style="flex-direction: row; justify-content: space-between;">
+                    <ui:VisualElement name="startRow" class="start-row" style="flex-grow: 1;">
+                        <ui:TextField name="startTimeField" label="开始" class="text-field-grow" />
+                        <ui:TextField name="endTimeField" label="结束" class="text-field-grow" />
+                    </ui:VisualElement>
+                    <ui:VisualElement name="timeButtonRow" class="row time-button-row" style="width: 100px;">
+                        <ui:Button name="resetTimeButton" text="重置时间" class="primary-button" />
+                        <ui:Button name="refreshButton" text="刷新" class="primary-button" />
+                    </ui:VisualElement>
                 </ui:VisualElement>
-                <ui:VisualElement name="timeButtonRow" class="row time-button-row" style="width: 100px;">
-                    <ui:Button name="resetTimeButton" text="重置时间" class="primary-button" />
-                    <ui:Button name="refreshButton" text="刷新" class="primary-button" />
-                </ui:VisualElement>
+                <ui:TextField name="searchField" tooltip="搜索变更区与待提交区（按文件名/路径）" readonly="false" is-delayed="false" multiline="false" tabindex="0" style="margin-top: 4px; height: 20px; margin-right: 4px; margin-bottom: 4px; margin-left: 4px;" />
             </ui:VisualElement>
-            <ui:TextField name="searchField" label="搜索" tooltip="搜索变更区与待提交区（按文件名/路径）" style="margin-top: 6px;" />
-        </ui:VisualElement>
             <ui:VisualElement name="middleRow" class="middle-row" style="flex-grow: 1; flex-direction: row; height: 1000px; width: 100%; justify-content: space-between;">
-                <ui:VisualElement name="leftColumn" class="list-column left-column" style="flex-grow: 1; height: auto; width: auto; border-top-width: 2px; border-right-width: 2px; border-bottom-width: 2px; border-left-width: 2px; border-left-color: rgba(255, 255, 255, 0.2); border-right-color: rgba(255, 255, 255, 0.2); border-top-color: rgba(255, 255, 255, 0.2); border-bottom-color: rgba(255, 255, 255, 0.2); border-top-left-radius: 4px; border-top-right-radius: 4px; border-bottom-right-radius: 4px; border-bottom-left-radius: 4px; margin-top: 2px; margin-right: 2px; margin-bottom: 2px; margin-left: 2px;">
+                <ui:VisualElement name="leftColumn" class="list-column left-column" style="flex-grow: 0; height: auto; width: 500px; border-top-width: 2px; border-right-width: 2px; border-bottom-width: 2px; border-left-width: 2px; border-left-color: rgba(255, 255, 255, 0.2); border-right-color: rgba(255, 255, 255, 0.2); border-top-color: rgba(255, 255, 255, 0.2); border-bottom-color: rgba(255, 255, 255, 0.2); border-top-left-radius: 4px; border-top-right-radius: 4px; border-bottom-right-radius: 4px; border-bottom-left-radius: 4px; margin-top: 2px; margin-right: 2px; margin-bottom: 2px; margin-left: 2px;">
                     <ui:VisualElement name="unstagedHeaderRow" class="row header-row" style="flex-direction: row; justify-content: space-between; height: 20px; width: auto; margin-bottom: 4px; margin-top: 4px; margin-right: 4px; margin-left: 4px; border-bottom-width: 1px; border-left-color: rgba(255, 255, 255, 0.2); border-right-color: rgba(255, 255, 255, 0.2); border-top-color: rgba(255, 255, 255, 0.2); border-bottom-color: rgba(255, 255, 255, 0.2);">
                         <ui:VisualElement name="unstagedSelectContainer" class="row select-container" style="flex-direction: row;">
                             <ui:Toggle name="unstagedSelectAllToggle" class="select-toggle" />
@@ -57,11 +57,11 @@
                     </ui:VisualElement>
                     <ui:ScrollView name="unstagedScrollView" class="scroll-fill" style="flex-grow: 1; height: 100%; width: 100%;" />
                 </ui:VisualElement>
-                <ui:VisualElement name="middleColumn" class="middle-column" style="width: 40px; justify-content: space-between; flex-shrink: 0; height: 100%;">
-                    <ui:Button name="toStagedButton" text="&gt;" class="arrow-button" style="flex-grow: 1;" />
-                    <ui:Button name="toUnstagedButton" text="&lt;" class="arrow-button" style="flex-grow: 1;" />
+                <ui:VisualElement name="middleColumn" class="middle-column" style="width: 40px; justify-content: center; flex-shrink: 1; height: auto; align-items: center; flex-grow: 0;">
+                    <ui:Button name="toStagedButton" text="&gt;" class="arrow-button" style="flex-grow: 0; width: 30px; height: 20px; padding-top: 0; padding-right: 0; padding-bottom: 0; padding-left: 0;" />
+                    <ui:Button name="toUnstagedButton" text="&lt;" class="arrow-button" style="flex-grow: 0; padding-top: 0; padding-right: 0; padding-bottom: 0; padding-left: 0; height: 20px; width: 30px;" />
                 </ui:VisualElement>
-                <ui:VisualElement name="rightColumn" class="list-column right-column" style="flex-grow: 1; height: auto; width: auto; border-top-width: 2px; border-right-width: 2px; border-bottom-width: 2px; border-left-width: 2px; border-left-color: rgba(255, 255, 255, 0.2); border-right-color: rgba(255, 255, 255, 0.2); border-top-color: rgba(255, 255, 255, 0.2); border-bottom-color: rgba(255, 255, 255, 0.2); border-top-left-radius: 4px; border-top-right-radius: 4px; border-bottom-right-radius: 4px; border-bottom-left-radius: 4px; margin-top: 2px; margin-right: 2px; margin-bottom: 2px; margin-left: 2px;">
+                <ui:VisualElement name="rightColumn" class="list-column right-column" style="flex-grow: 0; height: auto; width: 500px; border-top-width: 2px; border-right-width: 2px; border-bottom-width: 2px; border-left-width: 2px; border-left-color: rgba(255, 255, 255, 0.2); border-right-color: rgba(255, 255, 255, 0.2); border-top-color: rgba(255, 255, 255, 0.2); border-bottom-color: rgba(255, 255, 255, 0.2); border-top-left-radius: 4px; border-top-right-radius: 4px; border-bottom-right-radius: 4px; border-bottom-left-radius: 4px; margin-top: 2px; margin-right: 2px; margin-bottom: 2px; margin-left: 2px;">
                     <ui:VisualElement name="stagedHeaderRow" class="row header-row" style="flex-direction: row; height: 20px; justify-content: space-between; width: auto; margin-bottom: 4px; margin-top: 4px; margin-right: 4px; margin-left: 4px; border-bottom-width: 1px; border-left-color: rgba(255, 255, 255, 0.2); border-right-color: rgba(255, 255, 255, 0.2); border-top-color: rgba(255, 255, 255, 0.2); border-bottom-color: rgba(255, 255, 255, 0.2);">
                         <ui:VisualElement name="stagedSelectContainer" class="row select-container" style="flex-direction: row;">
                             <ui:Toggle name="stagedSelectAllToggle" class="select-toggle" />
@@ -86,7 +86,7 @@
                 <ui:Button name="commitAndPushButton" text="提交并推送" class="commit-button-push" style="flex-grow: 1;" />
             </ui:VisualElement>
         </ui:VisualElement>
-        <ui:VisualElement name="historyDropdown" style="display: none; position: absolute; left: 20%; top: 20%; right: 20%; bottom: 20%; flex-grow: 1; background-color: #1b1b1b; border-left-width: 1px; border-right-width: 1px; border-top-width: 1px; border-bottom-width: 1px; border-left-color: #3c3c3c; border-right-color: #3c3c3c; border-top-color: #3c3c3c; border-bottom-color: #3c3c3c; border-top-left-radius: 4px; border-top-right-radius: 4px; border-bottom-left-radius: 4px; border-bottom-right-radius: 4px; padding-left: 6px; padding-right: 6px; padding-top: 6px; padding-bottom: 6px;">
+        <ui:VisualElement name="historyDropdown" style="display: none; position: absolute; left: 20%; top: 20%; right: 20%; bottom: 20%; flex-grow: 1; background-color: rgb(27, 27, 27); border-left-width: 1px; border-right-width: 1px; border-top-width: 1px; border-bottom-width: 1px; border-left-color: rgb(60, 60, 60); border-right-color: rgb(60, 60, 60); border-top-color: rgb(60, 60, 60); border-bottom-color: rgb(60, 60, 60); border-top-left-radius: 4px; border-top-right-radius: 4px; border-bottom-left-radius: 4px; border-bottom-right-radius: 4px; padding-left: 6px; padding-right: 6px; padding-top: 6px; padding-bottom: 6px;">
             <ui:ListView name="historyListView" style="flex-grow: 1;" />
         </ui:VisualElement>
     </ui:VisualElement>

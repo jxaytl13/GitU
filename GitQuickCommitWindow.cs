@@ -131,7 +131,8 @@ namespace OneKey.GitTools
 
             var window = GetWindow<GitQuickCommitWindow>();
             window.titleContent = new GUIContent(WindowTitle);
-            window.minSize = new Vector2(600, 500);
+            window.minSize = new Vector2(1040, 700);
+            window.maxSize = new Vector2(1040, 1080);
             window.Initialize(obj);
             window.Show();
         }
