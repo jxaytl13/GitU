@@ -153,6 +153,7 @@ namespace TLNexus.GitU
         private Label repositoryStatusLabel;
         private Toggle unstagedSelectAllToggle;
         private Toggle stagedSelectAllToggle;
+        private Label toastLabel;
 
         private VisualElement leftColumn;
         private Label emptyPlaceholderLabel;
@@ -175,7 +176,6 @@ namespace TLNexus.GitU
             public Label NameLabel;
             public Label TimeLabel;
             public Label PathLabel;
-            public Button DiscardButton;
             public GitAssetInfo Info;
         }
 
@@ -600,7 +600,12 @@ namespace TLNexus.GitU
         {
             if (notificationEndTime > 0 && EditorApplication.timeSinceStartup >= notificationEndTime)
             {
-                RemoveNotification();
+                if (toastLabel != null)
+                {
+                    toastLabel.style.display = DisplayStyle.None;
+                    toastLabel.text = string.Empty;
+                }
+
                 notificationEndTime = 0;
             }
 
@@ -656,8 +661,12 @@ namespace TLNexus.GitU
                 return;
             }
 
-            ShowNotification(new GUIContent(message));
-            notificationEndTime = EditorApplication.timeSinceStartup + seconds;
+            if (toastLabel != null)
+            {
+                toastLabel.text = message;
+                toastLabel.style.display = DisplayStyle.Flex;
+                notificationEndTime = EditorApplication.timeSinceStartup + seconds;
+            }
         }
 
         private void CreateGUI()
@@ -1094,6 +1103,7 @@ namespace TLNexus.GitU
             unstagedSelectAllToggle = root.Q<Toggle>("unstagedSelectAllToggle");
             stagedSelectAllToggle = root.Q<Toggle>("stagedSelectAllToggle");
             leftColumn = root.Q<VisualElement>("leftColumn");
+            toastLabel = root.Q<Label>("toastLabel");
         }
 
         private void ConfigureChangeTypeButtons()
@@ -2929,50 +2939,62 @@ namespace TLNexus.GitU
             container.style.borderBottomWidth = 1;
             container.style.borderBottomColor = new Color(0.2f, 0.2f, 0.2f, 1f);
 
-            var headerRow = new VisualElement();
-            headerRow.style.flexDirection = FlexDirection.Row;
-            headerRow.style.alignItems = Align.Center;
+            var row = new VisualElement();
+            row.style.flexDirection = FlexDirection.Row;
+            row.style.alignItems = Align.FlexStart;
 
             var selectToggle = new Toggle();
             selectToggle.style.width = 16;
             selectToggle.style.marginRight = 4;
-            headerRow.Add(selectToggle);
+            selectToggle.style.marginTop = 2;
+            row.Add(selectToggle);
+
+            var namePathColumn = new VisualElement();
+            namePathColumn.style.flexDirection = FlexDirection.Column;
+            namePathColumn.style.flexGrow = 1f;
+            namePathColumn.style.flexShrink = 1f;
+            namePathColumn.style.minWidth = 0;
+            row.Add(namePathColumn);
 
             var nameLabel = new Label();
             nameLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
-            headerRow.Add(nameLabel);
-
-            var spacer = new VisualElement();
-            spacer.style.flexGrow = 1f;
-            headerRow.Add(spacer);
-
-            var timeLabel = new Label();
-            timeLabel.style.marginLeft = 8;
-            timeLabel.style.fontSize = 10;
-            timeLabel.style.color = new Color(1f, 1f, 1f, 0.6f);
-            headerRow.Add(timeLabel);
-
-            container.Add(headerRow);
-
-            var pathRow = new VisualElement();
-            pathRow.style.flexDirection = FlexDirection.Row;
-            pathRow.style.alignItems = Align.Center;
+            nameLabel.style.whiteSpace = WhiteSpace.NoWrap;
+            nameLabel.style.overflow = Overflow.Hidden;
+            nameLabel.style.textOverflow = TextOverflow.Ellipsis;
+            namePathColumn.Add(nameLabel);
 
             var pathInfoLabel = new Label();
+            pathInfoLabel.style.marginTop = 2;
             pathInfoLabel.style.fontSize = 10;
-            pathInfoLabel.style.color = new Color(1f, 1f, 1f, 0.6f);
-            pathInfoLabel.style.flexGrow = 1f;
-            pathRow.Add(pathInfoLabel);
+            pathInfoLabel.style.color = new Color(1f, 1f, 1f, 0.55f);
+            pathInfoLabel.style.whiteSpace = WhiteSpace.NoWrap;
+            pathInfoLabel.style.overflow = Overflow.Hidden;
+            pathInfoLabel.style.textOverflow = TextOverflow.Ellipsis;
+            namePathColumn.Add(pathInfoLabel);
+
+            var rightColumn = new VisualElement();
+            rightColumn.style.flexDirection = FlexDirection.Column;
+            rightColumn.style.alignItems = Align.FlexEnd;
+            rightColumn.style.flexShrink = 0;
+            rightColumn.style.marginLeft = 8;
+            row.Add(rightColumn);
+
+            var timeLabel = new Label();
+            timeLabel.style.fontSize = 10;
+            timeLabel.style.color = new Color(1f, 1f, 1f, 0.6f);
+            timeLabel.style.unityTextAlign = TextAnchor.UpperRight;
+            rightColumn.Add(timeLabel);
 
             Button discardButton = null;
             if (!stagedView)
             {
                 discardButton = new Button { text = "放弃更改" };
-                discardButton.style.marginLeft = 4;
-                pathRow.Add(discardButton);
+                discardButton.style.marginTop = 6;
+                discardButton.style.alignSelf = Align.FlexEnd;
+                rightColumn.Add(discardButton);
             }
 
-            container.Add(pathRow);
+            container.Add(row);
 
             var refs = new AssetRowRefs
             {
@@ -2980,8 +3002,7 @@ namespace TLNexus.GitU
                 SelectToggle = selectToggle,
                 NameLabel = nameLabel,
                 TimeLabel = timeLabel,
-                PathLabel = pathInfoLabel,
-                DiscardButton = discardButton
+                PathLabel = pathInfoLabel
             };
             container.userData = refs;
 
