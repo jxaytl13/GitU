@@ -398,19 +398,6 @@ namespace TLNexus.GitU
                     return button;
                 }
 
-                statusBlock.Add(CreateTypeButton("modifiedButton", "修改 (M)", Rgb(242, 191, 102), marginLeft: 4, marginRight: 2));
-                statusBlock.Add(CreateTypeButton("addedButton", "新增 (A)", Rgb(128, 217, 128), marginLeft: 2, marginRight: 2));
-                statusBlock.Add(CreateTypeButton("deletedButton", "删除 (D)", Rgb(230, 128, 128), marginLeft: 2, marginRight: 2));
-
-                var fengexian = new VisualElement { name = "fengexian" };
-                fengexian.style.flexShrink = 0;
-                fengexian.style.height = 10;
-                fengexian.style.marginRight = 2;
-                fengexian.style.marginLeft = 2;
-                fengexian.style.width = 1;
-                fengexian.style.backgroundColor = Rgba(255, 255, 255, 0.12f);
-                statusBlock.Add(fengexian);
-
                 var settingButton = new Button { name = "Setting", text = "S" };
                 settingButton.style.height = 22;
                 settingButton.style.width = 22;
@@ -484,7 +471,7 @@ namespace TLNexus.GitU
                 var searchFieldElement = new TextField { name = "searchField", tooltip = "Search files, paths, or changes..." };
                 searchFieldElement.AddToClassList("search-field");
                 searchFieldElement.style.marginTop = 0;
-                searchFieldElement.style.marginRight = 5;
+                searchFieldElement.style.marginRight = 10;
                 searchFieldElement.style.marginBottom = 0;
                 searchFieldElement.style.marginLeft = 5;
                 searchFieldElement.style.borderTopLeftRadius = 0;
@@ -495,36 +482,21 @@ namespace TLNexus.GitU
                 searchFieldElement.style.flexShrink = 1;
                 filterBox.Add(searchFieldElement);
 
-                var assetTypeMenuElement2 = new ToolbarMenu { name = "assetTypeMenu" };
-                assetTypeMenuElement2.AddToClassList("toolbar-dropdown");
-                assetTypeMenuElement2.style.paddingTop = 0;
-                assetTypeMenuElement2.style.paddingRight = 5;
-                assetTypeMenuElement2.style.paddingBottom = 0;
-                assetTypeMenuElement2.style.paddingLeft = 0;
-                assetTypeMenuElement2.style.marginLeft = 0;
-                assetTypeMenuElement2.style.marginTop = 0;
-                assetTypeMenuElement2.style.marginRight = 0;
-                assetTypeMenuElement2.style.marginBottom = 0;
-                assetTypeMenuElement2.style.height = 22;
-                assetTypeMenuElement2.style.borderTopWidth = 0;
-                assetTypeMenuElement2.style.borderRightWidth = 0;
-                assetTypeMenuElement2.style.borderBottomWidth = 0;
-                assetTypeMenuElement2.style.borderLeftWidth = 0;
-                assetTypeMenuElement2.style.borderTopLeftRadius = 4;
-                assetTypeMenuElement2.style.borderTopRightRadius = 4;
-                assetTypeMenuElement2.style.borderBottomRightRadius = 4;
-                assetTypeMenuElement2.style.borderBottomLeftRadius = 4;
-                assetTypeMenuElement2.style.width = 140;
-                filterBox.Add(assetTypeMenuElement2);
+                var changeTypeButtons = new VisualElement { name = "changeTypeButtons" };
+                changeTypeButtons.style.flexDirection = FlexDirection.Row;
+                changeTypeButtons.style.alignItems = Align.Center;
+                changeTypeButtons.style.justifyContent = Justify.FlexEnd;
+                changeTypeButtons.style.flexGrow = 0;
+                changeTypeButtons.style.flexShrink = 0;
+                changeTypeButtons.style.marginLeft = 0;
+                changeTypeButtons.style.marginRight = 10;
+                changeTypeButtons.style.marginTop = 0;
+                changeTypeButtons.style.marginBottom = 0;
+                filterBox.Add(changeTypeButtons);
 
-                var upButton = new Button { text = "上" };
-                upButton.style.height = 22;
-                upButton.style.width = 22;
-                upButton.style.marginRight = 4;
-                upButton.style.marginLeft = 4;
-                upButton.style.paddingRight = 2;
-                upButton.style.paddingLeft = 2;
-                filterBox.Add(upButton);
+                changeTypeButtons.Add(CreateTypeButton("modifiedButton", "修改 (M)", Rgb(242, 191, 102), marginLeft: 0, marginRight: 2));
+                changeTypeButtons.Add(CreateTypeButton("addedButton", "新增 (A)", Rgb(128, 217, 128), marginLeft: 2, marginRight: 2));
+                changeTypeButtons.Add(CreateTypeButton("deletedButton", "删除 (D)", Rgb(230, 128, 128), marginLeft: 2, marginRight: 0));
 
                 var mainArea = new VisualElement { name = "mainArea" };
                 mainArea.AddToClassList("main-area");
@@ -595,6 +567,20 @@ namespace TLNexus.GitU
                 ApplyPanelRightBaseStyle(unstagedHeaderLabelElement);
                 unstagedHeaderRow.Add(unstagedHeaderLabelElement);
 
+                var unstagedListContainer = new VisualElement { name = "unstagedListContainer" };
+                unstagedListContainer.style.flexGrow = 1;
+                unstagedListContainer.style.flexShrink = 1;
+                unstagedListContainer.style.position = Position.Relative;
+                unstagedListContainer.style.marginTop = 0;
+                unstagedListContainer.style.marginRight = 0;
+                unstagedListContainer.style.marginBottom = 0;
+                unstagedListContainer.style.marginLeft = 0;
+                unstagedListContainer.style.paddingTop = 0;
+                unstagedListContainer.style.paddingRight = 0;
+                unstagedListContainer.style.paddingBottom = 0;
+                unstagedListContainer.style.paddingLeft = 0;
+                leftColumnElement.Add(unstagedListContainer);
+
                 var unstagedListView = new ListView { name = "unstagedScrollView" };
                 unstagedListView.AddToClassList("panel-list");
                 unstagedListView.style.flexGrow = 1;
@@ -643,7 +629,34 @@ namespace TLNexus.GitU
                     unstagedScrollView.style.borderTopLeftRadius = 0;
                     unstagedScrollView.style.borderTopRightRadius = 0;
                 }
-                leftColumnElement.Add(unstagedListView);
+                unstagedListContainer.Add(unstagedListView);
+
+                var unstagedEmptyHintOverlay = new VisualElement { name = "unstagedEmptyHintOverlay" };
+                unstagedEmptyHintOverlay.style.position = Position.Absolute;
+                unstagedEmptyHintOverlay.style.left = 0;
+                unstagedEmptyHintOverlay.style.right = 0;
+                unstagedEmptyHintOverlay.style.top = 0;
+                unstagedEmptyHintOverlay.style.bottom = 0;
+                unstagedEmptyHintOverlay.style.backgroundColor = Color.clear;
+                unstagedEmptyHintOverlay.style.display = DisplayStyle.None;
+                unstagedEmptyHintOverlay.pickingMode = PickingMode.Position;
+                unstagedListContainer.Add(unstagedEmptyHintOverlay);
+
+                var unstagedEmptyHintLabel = new Label
+                {
+                    name = "unstagedEmptyHintLabel",
+                    text = "暂无变更\n\n提示：\n拖拽条目到“待提交”可加入待提交\nCtrl：多选\nShift：连续选择\nCtrl+A：全选"
+                };
+                unstagedEmptyHintLabel.style.flexGrow = 1;
+                unstagedEmptyHintLabel.style.unityTextAlign = TextAnchor.MiddleCenter;
+                unstagedEmptyHintLabel.style.whiteSpace = WhiteSpace.Normal;
+                unstagedEmptyHintLabel.style.fontSize = 11;
+                unstagedEmptyHintLabel.style.color = Rgba(255, 255, 255, 0.45f);
+                unstagedEmptyHintLabel.style.paddingLeft = 14;
+                unstagedEmptyHintLabel.style.paddingRight = 14;
+                unstagedEmptyHintLabel.style.paddingTop = 10;
+                unstagedEmptyHintLabel.style.paddingBottom = 10;
+                unstagedEmptyHintOverlay.Add(unstagedEmptyHintLabel);
 
                 var rightColumnElement = new VisualElement { name = "rightColumn" };
                 rightColumnElement.AddToClassList("panel");
@@ -695,6 +708,20 @@ namespace TLNexus.GitU
                 ApplyPanelRightBaseStyle(stagedHeaderLabelElement);
                 stagedHeaderRow.Add(stagedHeaderLabelElement);
 
+                var stagedListContainer = new VisualElement { name = "stagedListContainer" };
+                stagedListContainer.style.flexGrow = 1;
+                stagedListContainer.style.flexShrink = 1;
+                stagedListContainer.style.position = Position.Relative;
+                stagedListContainer.style.marginTop = 0;
+                stagedListContainer.style.marginRight = 0;
+                stagedListContainer.style.marginBottom = 0;
+                stagedListContainer.style.marginLeft = 0;
+                stagedListContainer.style.paddingTop = 0;
+                stagedListContainer.style.paddingRight = 0;
+                stagedListContainer.style.paddingBottom = 0;
+                stagedListContainer.style.paddingLeft = 0;
+                rightColumnElement.Add(stagedListContainer);
+
                 var stagedListView = new ListView { name = "stagedScrollView" };
                 stagedListView.AddToClassList("panel-list");
                 stagedListView.style.flexGrow = 1;
@@ -743,17 +770,140 @@ namespace TLNexus.GitU
                     stagedScrollView.style.borderTopLeftRadius = 0;
                     stagedScrollView.style.borderTopRightRadius = 0;
                 }
-                rightColumnElement.Add(stagedListView);
+                stagedListContainer.Add(stagedListView);
+
+                var stagedEmptyHintOverlay = new VisualElement { name = "stagedEmptyHintOverlay" };
+                stagedEmptyHintOverlay.style.position = Position.Absolute;
+                stagedEmptyHintOverlay.style.left = 0;
+                stagedEmptyHintOverlay.style.right = 0;
+                stagedEmptyHintOverlay.style.top = 0;
+                stagedEmptyHintOverlay.style.bottom = 0;
+                stagedEmptyHintOverlay.style.backgroundColor = Color.clear;
+                stagedEmptyHintOverlay.style.display = DisplayStyle.None;
+                stagedEmptyHintOverlay.pickingMode = PickingMode.Position;
+                stagedListContainer.Add(stagedEmptyHintOverlay);
+
+                var stagedEmptyHintLabel = new Label
+                {
+                    name = "stagedEmptyHintLabel",
+                    text = "暂无待提交条目\n\n提示：\n拖拽条目到“变更区”可取消待提交\nCtrl：多选\nShift：连续选择\nCtrl+A：全选"
+                };
+                stagedEmptyHintLabel.style.flexGrow = 1;
+                stagedEmptyHintLabel.style.unityTextAlign = TextAnchor.MiddleCenter;
+                stagedEmptyHintLabel.style.whiteSpace = WhiteSpace.Normal;
+                stagedEmptyHintLabel.style.fontSize = 11;
+                stagedEmptyHintLabel.style.color = Rgba(255, 255, 255, 0.45f);
+                stagedEmptyHintLabel.style.paddingLeft = 14;
+                stagedEmptyHintLabel.style.paddingRight = 14;
+                stagedEmptyHintLabel.style.paddingTop = 10;
+                stagedEmptyHintLabel.style.paddingBottom = 10;
+                stagedEmptyHintOverlay.Add(stagedEmptyHintLabel);
+
+                var repositoryStatusRowElement = new VisualElement { name = "repositoryStatusRow" };
+                repositoryStatusRowElement.AddToClassList("repo-status-row");
+                repositoryStatusRowElement.style.flexDirection = FlexDirection.Row;
+                repositoryStatusRowElement.style.alignItems = Align.Center;
+                repositoryStatusRowElement.style.justifyContent = Justify.SpaceBetween;
+                repositoryStatusRowElement.style.marginBottom = 10;
+                repositoryStatusRowElement.style.marginRight = 10;
+                repositoryStatusRowElement.style.marginLeft = 10;
+                repositoryStatusRowElement.style.marginTop = 10;
+                rootContainer.Add(repositoryStatusRowElement);
 
                 var repositoryStatusLabelElement = new Label { name = "repositoryStatusLabel", enableRichText = true };
                 repositoryStatusLabelElement.AddToClassList("repo-status");
                 repositoryStatusLabelElement.style.fontSize = 11;
                 repositoryStatusLabelElement.style.color = Rgba(229, 231, 235, 0.7f);
-                repositoryStatusLabelElement.style.marginBottom = 10;
-                repositoryStatusLabelElement.style.marginRight = 10;
-                repositoryStatusLabelElement.style.marginLeft = 10;
-                repositoryStatusLabelElement.style.marginTop = 10;
-                rootContainer.Add(repositoryStatusLabelElement);
+                repositoryStatusLabelElement.style.flexGrow = 1;
+                repositoryStatusLabelElement.style.flexShrink = 1;
+                repositoryStatusLabelElement.style.marginTop = 0;
+                repositoryStatusLabelElement.style.marginRight = 0;
+                repositoryStatusLabelElement.style.marginBottom = 0;
+                repositoryStatusLabelElement.style.marginLeft = 0;
+                repositoryStatusRowElement.Add(repositoryStatusLabelElement);
+
+                var repositoryStatusRightElement = new VisualElement { name = "repositoryStatusRight" };
+                repositoryStatusRightElement.AddToClassList("repo-status-right");
+                repositoryStatusRightElement.style.flexDirection = FlexDirection.Row;
+                repositoryStatusRightElement.style.alignItems = Align.Center;
+                repositoryStatusRightElement.style.justifyContent = Justify.FlexEnd;
+                repositoryStatusRightElement.style.flexGrow = 0;
+                repositoryStatusRightElement.style.flexShrink = 0;
+                repositoryStatusRowElement.Add(repositoryStatusRightElement);
+
+                var sortInfoLabelElement = new Label { name = "sortInfoLabel" };
+                sortInfoLabelElement.style.fontSize = 10;
+                sortInfoLabelElement.style.color = Rgba(255, 255, 255, 0.5f);
+                sortInfoLabelElement.style.unityTextAlign = TextAnchor.MiddleRight;
+                sortInfoLabelElement.style.whiteSpace = WhiteSpace.NoWrap;
+                sortInfoLabelElement.style.flexGrow = 0;
+                sortInfoLabelElement.style.flexShrink = 0;
+                sortInfoLabelElement.style.marginLeft = 0;
+                sortInfoLabelElement.style.marginRight = 6;
+                sortInfoLabelElement.style.marginTop = 0;
+                sortInfoLabelElement.style.marginBottom = 0;
+                repositoryStatusRightElement.Add(sortInfoLabelElement);
+
+                var repositoryStatusUpButtonElement = new Button { name = "repositoryStatusUpButton", text = "⇅" };
+                repositoryStatusUpButtonElement.style.width = 20;
+                repositoryStatusUpButtonElement.style.height = 20;
+                repositoryStatusUpButtonElement.style.minWidth = 20;
+                repositoryStatusUpButtonElement.style.minHeight = 20;
+                repositoryStatusUpButtonElement.style.flexShrink = 0;
+                repositoryStatusUpButtonElement.style.marginLeft = 4;
+                repositoryStatusUpButtonElement.style.marginRight = 0;
+                repositoryStatusUpButtonElement.style.marginTop = 0;
+                repositoryStatusUpButtonElement.style.marginBottom = 0;
+                repositoryStatusUpButtonElement.style.paddingTop = 0;
+                repositoryStatusUpButtonElement.style.paddingRight = 0;
+                repositoryStatusUpButtonElement.style.paddingBottom = 0;
+                repositoryStatusUpButtonElement.style.paddingLeft = 0;
+                repositoryStatusUpButtonElement.style.unityTextAlign = TextAnchor.MiddleCenter;
+                repositoryStatusUpButtonElement.style.color = Rgba(255, 255, 255, 0.85f);
+                repositoryStatusUpButtonElement.style.fontSize = 12;
+                repositoryStatusUpButtonElement.style.unityBackgroundImageTintColor = Color.clear;
+
+                var sortButtonBg = Rgb(58, 58, 58);
+                var sortButtonBorder = Rgb(50, 50, 50);
+                var sortButtonBorderHover = Rgb(139, 92, 246);
+                var sortButtonHoverBg = Color.Lerp(sortButtonBg, Color.white, 0.08f);
+
+                repositoryStatusUpButtonElement.style.backgroundColor = sortButtonBg;
+                repositoryStatusUpButtonElement.style.borderTopLeftRadius = 4;
+                repositoryStatusUpButtonElement.style.borderTopRightRadius = 4;
+                repositoryStatusUpButtonElement.style.borderBottomRightRadius = 4;
+                repositoryStatusUpButtonElement.style.borderBottomLeftRadius = 4;
+                repositoryStatusUpButtonElement.style.borderTopWidth = 1;
+                repositoryStatusUpButtonElement.style.borderRightWidth = 1;
+                repositoryStatusUpButtonElement.style.borderBottomWidth = 1;
+                repositoryStatusUpButtonElement.style.borderLeftWidth = 1;
+                repositoryStatusUpButtonElement.style.borderTopColor = sortButtonBorder;
+                repositoryStatusUpButtonElement.style.borderRightColor = sortButtonBorder;
+                repositoryStatusUpButtonElement.style.borderBottomColor = sortButtonBorder;
+                repositoryStatusUpButtonElement.style.borderLeftColor = sortButtonBorder;
+
+                repositoryStatusUpButtonElement.RegisterCallback<MouseEnterEvent>(_ =>
+                {
+                    if (!repositoryStatusUpButtonElement.enabledInHierarchy)
+                    {
+                        return;
+                    }
+
+                    repositoryStatusUpButtonElement.style.backgroundColor = sortButtonHoverBg;
+                    repositoryStatusUpButtonElement.style.borderTopColor = sortButtonBorderHover;
+                    repositoryStatusUpButtonElement.style.borderRightColor = sortButtonBorderHover;
+                    repositoryStatusUpButtonElement.style.borderBottomColor = sortButtonBorderHover;
+                    repositoryStatusUpButtonElement.style.borderLeftColor = sortButtonBorderHover;
+                });
+                repositoryStatusUpButtonElement.RegisterCallback<MouseLeaveEvent>(_ =>
+                {
+                    repositoryStatusUpButtonElement.style.backgroundColor = sortButtonBg;
+                    repositoryStatusUpButtonElement.style.borderTopColor = sortButtonBorder;
+                    repositoryStatusUpButtonElement.style.borderRightColor = sortButtonBorder;
+                    repositoryStatusUpButtonElement.style.borderBottomColor = sortButtonBorder;
+                    repositoryStatusUpButtonElement.style.borderLeftColor = sortButtonBorder;
+                });
+                repositoryStatusRightElement.Add(repositoryStatusUpButtonElement);
 
                 var commitBox = new VisualElement { name = "commitBox" };
                 commitBox.AddToClassList("card");
@@ -904,15 +1054,18 @@ namespace TLNexus.GitU
                 historyDropdownElement.AddToClassList("history-modal");
                 historyDropdownElement.style.display = DisplayStyle.None;
                 historyDropdownElement.style.position = Position.Absolute;
-                historyDropdownElement.style.left = Percent(15);
-                historyDropdownElement.style.top = Percent(15);
-                historyDropdownElement.style.right = Percent(15);
-                historyDropdownElement.style.bottom = Percent(15);
+                historyDropdownElement.style.left = 0;
+                historyDropdownElement.style.top = 0;
+                historyDropdownElement.style.right = StyleKeyword.Auto;
+                historyDropdownElement.style.bottom = StyleKeyword.Auto;
+                historyDropdownElement.style.width = 480;
+                historyDropdownElement.style.height = 640;
                 historyDropdownElement.style.flexGrow = 1;
-                historyDropdownElement.style.paddingTop = 10;
-                historyDropdownElement.style.paddingRight = 10;
-                historyDropdownElement.style.paddingBottom = 10;
-                historyDropdownElement.style.paddingLeft = 10;
+                historyDropdownElement.style.flexDirection = FlexDirection.Column;
+                historyDropdownElement.style.paddingTop = 0;
+                historyDropdownElement.style.paddingRight = 0;
+                historyDropdownElement.style.paddingBottom = 0;
+                historyDropdownElement.style.paddingLeft = 0;
                 historyDropdownElement.style.backgroundColor = Html("#111115");
                 historyDropdownElement.style.borderTopWidth = 1;
                 historyDropdownElement.style.borderRightWidth = 1;
@@ -929,9 +1082,73 @@ namespace TLNexus.GitU
                 historyDropdownElement.style.borderBottomLeftRadius = 12;
                 rootContainer.Add(historyDropdownElement);
 
+                var historyHeaderBarElement = new VisualElement { name = "historyHeaderBar" };
+                historyHeaderBarElement.AddToClassList("history-header");
+                historyHeaderBarElement.style.flexDirection = FlexDirection.Row;
+                historyHeaderBarElement.style.alignItems = Align.Center;
+                historyHeaderBarElement.style.justifyContent = Justify.SpaceBetween;
+                historyHeaderBarElement.style.flexGrow = 0;
+                historyHeaderBarElement.style.flexShrink = 0;
+                historyHeaderBarElement.style.height = 32;
+                historyHeaderBarElement.style.backgroundColor = Rgba(255, 255, 255, 0.03f);
+                historyHeaderBarElement.style.paddingLeft = 0;
+                historyHeaderBarElement.style.paddingRight = 0;
+                historyHeaderBarElement.style.paddingTop = 0;
+                historyHeaderBarElement.style.paddingBottom = 0;
+                historyHeaderBarElement.style.borderBottomWidth = 1;
+                historyHeaderBarElement.style.borderBottomColor = dropdownBorder;
+                historyDropdownElement.Add(historyHeaderBarElement);
+
+                var historyTitleLabelElement = new Label("提交记录");
+                historyTitleLabelElement.AddToClassList("history-title");
+                historyTitleLabelElement.style.fontSize = 11;
+                historyTitleLabelElement.style.unityFontStyleAndWeight = FontStyle.Bold;
+                historyTitleLabelElement.style.color = Rgba(229, 231, 235, 0.85f);
+                historyTitleLabelElement.style.unityTextAlign = TextAnchor.MiddleLeft;
+                historyTitleLabelElement.style.flexGrow = 1;
+                historyTitleLabelElement.style.flexShrink = 1;
+                historyTitleLabelElement.style.marginLeft = 10;
+                historyHeaderBarElement.Add(historyTitleLabelElement);
+
+                var historyContentElement = new VisualElement { name = "historyContent" };
+                historyContentElement.AddToClassList("history-content");
+                historyContentElement.style.flexGrow = 1;
+                historyContentElement.style.flexShrink = 1;
+                historyContentElement.style.paddingLeft = 0;
+                historyContentElement.style.paddingRight = 0;
+                historyContentElement.style.paddingTop = 0;
+                historyContentElement.style.paddingBottom = 0;
+                historyDropdownElement.Add(historyContentElement);
+
                 var historyListViewElement = new ListView { name = "historyListView" };
                 historyListViewElement.style.flexGrow = 1;
-                historyDropdownElement.Add(historyListViewElement);
+                historyListViewElement.style.flexShrink = 1;
+                historyContentElement.Add(historyListViewElement);
+
+                var historyStatusBarElement = new VisualElement { name = "historyStatusBar" };
+                historyStatusBarElement.AddToClassList("history-status");
+                historyStatusBarElement.style.flexDirection = FlexDirection.Row;
+                historyStatusBarElement.style.alignItems = Align.Center;
+                historyStatusBarElement.style.justifyContent = Justify.SpaceBetween;
+                historyStatusBarElement.style.flexGrow = 0;
+                historyStatusBarElement.style.flexShrink = 0;
+                historyStatusBarElement.style.height = 28;
+                historyStatusBarElement.style.backgroundColor = Rgba(255, 255, 255, 0.03f);
+                historyStatusBarElement.style.paddingLeft = 0;
+                historyStatusBarElement.style.paddingRight = 0;
+                historyStatusBarElement.style.borderTopWidth = 1;
+                historyStatusBarElement.style.borderTopColor = dropdownBorder;
+                historyDropdownElement.Add(historyStatusBarElement);
+
+                var historyHintLabelElement = new Label("提示：最多显示前100条记录") { name = "historyHintLabel" };
+                historyHintLabelElement.AddToClassList("history-hint");
+                historyHintLabelElement.style.fontSize = 10;
+                historyHintLabelElement.style.color = Rgba(255, 255, 255, 0.5f);
+                historyHintLabelElement.style.unityTextAlign = TextAnchor.MiddleLeft;
+                historyHintLabelElement.style.flexGrow = 1;
+                historyHintLabelElement.style.flexShrink = 1;
+                historyHintLabelElement.style.marginLeft = 10;
+                historyStatusBarElement.Add(historyHintLabelElement);
 
                 var saveToDiskHint = new Label { name = "saveToDiskHintLabel" };
                 saveToDiskHint.AddToClassList("hint-text");

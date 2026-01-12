@@ -16,7 +16,10 @@ namespace TLNexus.GitU
         private const string MenuPath = "Window/T·L Nexus/GitU";
         private const string CommitHistoryFileName = "GitUCommitHistory.json";
         private const string LegacyCommitHistoryFileName = "QuickGitCommitHistory.json";
-        private const int MaxCommitHistoryEntries = 20;
+        private const int MaxCommitHistoryEntries = 8100;
+        private const int MaxCommitHistoryDisplayEntries = 100;
+        private const string SortKeyPrefsKeyPrefix = "TLNexus.GitU.SortKey:";
+        private const string SortOrderPrefsKeyPrefix = "TLNexus.GitU.SortOrder:";
         private const string StagedAllowListFileName = "GitUStagedAllowList.json";
         private const string LegacyStagedAllowListFileName = "QuickGitCommitStagedAllowList.json";
         private const string AssetTypeFilterPrefsKeyPrefix = "TLNexus.GitU.AssetTypeFilters:";
@@ -136,6 +139,24 @@ namespace TLNexus.GitU
         private int stagedSelectionAnchorIndex = -1;
         private bool? lastActiveStagedView;
 
+        private enum AssetSortKey
+        {
+            GitStatus,
+            AssetType,
+            Name,
+            Time,
+            Path
+        }
+
+        private enum SortOrder
+        {
+            Ascending,
+            Descending
+        }
+
+        private AssetSortKey assetSortKey = AssetSortKey.Path;
+        private SortOrder assetSortOrder = SortOrder.Ascending;
+
         // UI Toolkit elements
         private ObjectField targetField;
         private Label pathLabel;
@@ -155,13 +176,18 @@ namespace TLNexus.GitU
         private Button commitAndPushButton;
         private Button historyButton;
         private Button refreshButton;
+        private Button repositoryStatusUpButton;
+        private Label sortInfoLabel;
         private VisualElement historyDropdown;
         private ListView historyListView;
         private Label repositoryStatusLabel;
         private Label toastLabel;
 
         private VisualElement leftColumn;
-        private Label emptyPlaceholderLabel;
+        private VisualElement unstagedListContainer;
+        private VisualElement stagedListContainer;
+        private VisualElement unstagedEmptyHintOverlay;
+        private VisualElement stagedEmptyHintOverlay;
 
         private readonly List<GitAssetInfo> visibleUnstagedItems = new List<GitAssetInfo>();
         private readonly List<GitAssetInfo> visibleStagedItems = new List<GitAssetInfo>();
@@ -171,8 +197,15 @@ namespace TLNexus.GitU
         private bool assetListViewsConfigured;
         private bool visibleListsInitialized;
 
+        private VisualElement sortMenuOverlay;
+        private VisualElement sortMenuPanel;
+        private int sortMenuPositionRequestId;
+        private int sortMenuPendingPositionAttempts;
+
         private static string AssetTypeFilterPrefsKey => $"{AssetTypeFilterPrefsKeyPrefix}{Application.dataPath}";
         private static string LegacyAssetTypeFilterPrefsKey => $"{LegacyAssetTypeFilterPrefsKeyPrefix}{Application.dataPath}";
+        private static string SortKeyPrefsKey => $"{SortKeyPrefsKeyPrefix}{Application.dataPath}";
+        private static string SortOrderPrefsKey => $"{SortOrderPrefsKeyPrefix}{Application.dataPath}";
 
         private sealed class AssetRowRefs
         {
@@ -187,7 +220,6 @@ namespace TLNexus.GitU
 
             public bool DragArmed;
             public Vector3 DragStartPosition;
-            public int DragPointerId;
         }
 
         // Notification
@@ -686,6 +718,7 @@ namespace TLNexus.GitU
             autoCleanExternalStagedOnOpen = true;
             LoadStagedAllowList();
             LoadAssetTypeFilters();
+            LoadSortSettings();
             assetListViewsConfigured = false;
             lastUnstagedVisibleCount = -1;
             lastStagedVisibleCount = -1;
@@ -695,13 +728,27 @@ namespace TLNexus.GitU
 
             var root = rootVisualElement;
             root.Clear();
+            sortMenuOverlay = null;
+            sortMenuPanel = null;
+            sortMenuPositionRequestId = 0;
 
             if (!BuildLayoutFromCode(root))
             {
                 return;
             }
 
+            UpdateSortInfoLabel();
+
+            root.RegisterCallback<GeometryChangedEvent>(_ =>
+            {
+                if (historyDropdownVisible)
+                {
+                    UpdateHistoryDropdownLayout();
+                }
+            });
+
             EnsureAssetListViewsConfigured();
+            UpdateListEmptyHints();
 
             if (saveToDiskHintLabel != null)
             {
@@ -767,16 +814,56 @@ namespace TLNexus.GitU
             {
                 historyButton.clicked += ToggleHistoryDropdown;
             }
+            if (repositoryStatusUpButton != null)
+            {
+                repositoryStatusUpButton.tooltip = "排序";
+                repositoryStatusUpButton.clicked += ToggleSortMenu;
+            }
             if (historyListView != null)
             {
                 historyListView.selectionType = SelectionType.Single;
+                historyListView.virtualizationMethod = CollectionVirtualizationMethod.DynamicHeight;
                 historyListView.makeItem = () =>
                 {
-                    return new Label();
+                    var row = new VisualElement();
+                    row.style.flexDirection = FlexDirection.Row;
+                    row.style.alignItems = Align.Center;
+                    row.style.height = StyleKeyword.Auto;
+                    row.style.minHeight = 30;
+                    row.style.paddingBottom = 6;
+                    row.style.borderBottomWidth = 1;
+                    row.style.borderBottomColor = new Color(1f, 1f, 1f, 0.05f);
+
+                    var icon = new Image { name = "historyItemIcon" };
+                    icon.image = EditorGUIUtility.IconContent("TextAsset Icon").image as Texture2D;
+                    icon.scaleMode = ScaleMode.ScaleToFit;
+                    icon.tintColor = new Color(1f, 1f, 1f, 0.5f);
+                    icon.style.width = 14;
+                    icon.style.height = 14;
+                    icon.style.marginLeft = 10;
+                    icon.style.marginRight = 6;
+                    icon.style.marginTop = 0;
+                    icon.style.marginBottom = 0;
+                    row.Add(icon);
+
+                    var label = new Label { name = "historyItemLabel" };
+                    label.style.flexGrow = 1;
+                    label.style.flexShrink = 1;
+                    label.style.unityTextAlign = TextAnchor.UpperLeft;
+                    label.style.fontSize = 11;
+                    label.style.whiteSpace = WhiteSpace.Normal;
+                    label.style.marginTop = 0;
+                    label.style.marginRight = 0;
+                    label.style.marginBottom = 0;
+                    label.style.marginLeft = 0;
+                    row.Add(label);
+
+                    return row;
                 };
                 historyListView.bindItem = (element, i) =>
                 {
-                    if (element is Label label)
+                    var label = element.Q<Label>("historyItemLabel");
+                    if (label != null)
                     {
                         var hasEntries = commitHistory != null && i >= 0 && i < commitHistory.Count;
                         label.text = hasEntries ? commitHistory[i] : string.Empty;
@@ -802,6 +889,50 @@ namespace TLNexus.GitU
             UpdateHeaderLabels();
             UpdateCommitButtonsEnabled();
             RefreshListViews();
+        }
+
+        private void UpdateHistoryDropdownLayout()
+        {
+            if (historyDropdown == null)
+            {
+                return;
+            }
+
+            var host = historyDropdown.parent ?? rootVisualElement;
+            if (host == null)
+            {
+                return;
+            }
+
+            var hostWidth = host.resolvedStyle.width;
+            var hostHeight = host.resolvedStyle.height;
+            if (hostWidth <= 0f || hostHeight <= 0f)
+            {
+                return;
+            }
+
+            const float widthOverHeight = 3f / 4f;
+            var maxWidth = hostWidth * 0.92f;
+            var maxHeight = hostHeight * 0.92f;
+
+            var desiredHeight = Mathf.Clamp(hostHeight * 0.75f, 360f, 720f);
+            var desiredWidth = desiredHeight * widthOverHeight;
+
+            if (desiredWidth > maxWidth)
+            {
+                desiredWidth = maxWidth;
+                desiredHeight = desiredWidth / widthOverHeight;
+            }
+            if (desiredHeight > maxHeight)
+            {
+                desiredHeight = maxHeight;
+                desiredWidth = desiredHeight * widthOverHeight;
+            }
+
+            historyDropdown.style.width = desiredWidth;
+            historyDropdown.style.height = desiredHeight;
+            historyDropdown.style.left = (hostWidth - desiredWidth) * 0.5f;
+            historyDropdown.style.top = (hostHeight - desiredHeight) * 0.5f;
         }
 
         private void ConfigureSearchPlaceholder()
@@ -1175,11 +1306,414 @@ namespace TLNexus.GitU
             commitAndPushButton = root.Q<Button>("commitAndPushButton");
             historyButton = root.Q<Button>("historyButton");
             refreshButton = root.Q<Button>("refreshButton");
+            repositoryStatusUpButton = root.Q<Button>("repositoryStatusUpButton");
+            sortInfoLabel = root.Q<Label>("sortInfoLabel");
             historyDropdown = root.Q<VisualElement>("historyDropdown");
             historyListView = root.Q<ListView>("historyListView");
             repositoryStatusLabel = root.Q<Label>("repositoryStatusLabel");
             leftColumn = root.Q<VisualElement>("leftColumn");
             toastLabel = root.Q<Label>("toastLabel");
+            unstagedListContainer = root.Q<VisualElement>("unstagedListContainer");
+            stagedListContainer = root.Q<VisualElement>("stagedListContainer");
+            unstagedEmptyHintOverlay = root.Q<VisualElement>("unstagedEmptyHintOverlay");
+            stagedEmptyHintOverlay = root.Q<VisualElement>("stagedEmptyHintOverlay");
+        }
+
+        private void LoadSortSettings()
+        {
+            var key = EditorPrefs.GetInt(SortKeyPrefsKey, (int)AssetSortKey.Path);
+            if (Enum.IsDefined(typeof(AssetSortKey), key))
+            {
+                assetSortKey = (AssetSortKey)key;
+            }
+            else
+            {
+                assetSortKey = AssetSortKey.Path;
+            }
+
+            var order = EditorPrefs.GetInt(SortOrderPrefsKey, (int)SortOrder.Ascending);
+            if (Enum.IsDefined(typeof(SortOrder), order))
+            {
+                assetSortOrder = (SortOrder)order;
+            }
+            else
+            {
+                assetSortOrder = SortOrder.Ascending;
+            }
+
+            UpdateSortInfoLabel();
+        }
+
+        private void SaveSortSettings()
+        {
+            EditorPrefs.SetInt(SortKeyPrefsKey, (int)assetSortKey);
+            EditorPrefs.SetInt(SortOrderPrefsKey, (int)assetSortOrder);
+            UpdateSortInfoLabel();
+        }
+
+        private void UpdateSortInfoLabel()
+        {
+            if (sortInfoLabel == null)
+            {
+                return;
+            }
+
+            sortInfoLabel.text = $"{GetSortKeyLabel(assetSortKey)}｜{GetSortOrderLabel(assetSortOrder)}";
+        }
+
+        private static string GetSortKeyLabel(AssetSortKey key)
+        {
+            switch (key)
+            {
+                case AssetSortKey.GitStatus:
+                    return "Git 状态";
+                case AssetSortKey.AssetType:
+                    return "资源类型";
+                case AssetSortKey.Name:
+                    return "名称";
+                case AssetSortKey.Time:
+                    return "时间";
+                case AssetSortKey.Path:
+                    return "路径";
+                default:
+                    return "路径";
+            }
+        }
+
+        private static string GetSortOrderLabel(SortOrder order)
+        {
+            switch (order)
+            {
+                case SortOrder.Ascending:
+                    return "升序";
+                case SortOrder.Descending:
+                    return "降序";
+                default:
+                    return "升序";
+            }
+        }
+
+        private void ToggleSortMenu()
+        {
+            if (sortMenuOverlay != null && sortMenuOverlay.resolvedStyle.display == DisplayStyle.Flex)
+            {
+                HideSortMenu();
+                return;
+            }
+
+            ShowSortMenu();
+        }
+
+        private void ShowSortMenu()
+        {
+            if (repositoryStatusUpButton == null)
+            {
+                return;
+            }
+
+            EnsureSortMenuOverlay();
+            RebuildSortMenuContents();
+
+            sortMenuOverlay.style.display = DisplayStyle.Flex;
+            sortMenuOverlay.BringToFront();
+            sortMenuOverlay.Focus();
+
+            sortMenuPositionRequestId++;
+            sortMenuPendingPositionAttempts = 0;
+            sortMenuPanel.style.visibility = Visibility.Hidden;
+            sortMenuPanel.style.left = -10000;
+            sortMenuPanel.style.top = -10000;
+            PositionSortMenuPanel();
+        }
+
+        private void HideSortMenu()
+        {
+            if (sortMenuOverlay == null)
+            {
+                return;
+            }
+
+            sortMenuPositionRequestId++;
+            sortMenuPendingPositionAttempts = 0;
+            sortMenuOverlay.style.display = DisplayStyle.None;
+            if (sortMenuPanel != null)
+            {
+                sortMenuPanel.style.visibility = Visibility.Hidden;
+                sortMenuPanel.style.left = -10000;
+                sortMenuPanel.style.top = -10000;
+            }
+        }
+
+        private void EnsureSortMenuOverlay()
+        {
+            if (sortMenuOverlay != null)
+            {
+                return;
+            }
+
+            sortMenuOverlay = new VisualElement { name = "gitU-sort-menu-overlay" };
+            sortMenuOverlay.style.display = DisplayStyle.None;
+            sortMenuOverlay.style.position = Position.Absolute;
+            sortMenuOverlay.style.left = 0;
+            sortMenuOverlay.style.top = 0;
+            sortMenuOverlay.style.right = 0;
+            sortMenuOverlay.style.bottom = 0;
+            sortMenuOverlay.style.backgroundColor = Color.clear;
+
+            sortMenuOverlay.RegisterCallback<MouseDownEvent>(evt =>
+            {
+                if (sortMenuPanel == null)
+                {
+                    return;
+                }
+
+                if (IsDescendantOf(evt.target as VisualElement, sortMenuPanel))
+                {
+                    return;
+                }
+
+                HideSortMenu();
+                evt.StopPropagation();
+            });
+            sortMenuOverlay.RegisterCallback<KeyDownEvent>(evt =>
+            {
+                if (evt.keyCode == KeyCode.Escape)
+                {
+                    HideSortMenu();
+                    evt.StopPropagation();
+                    evt.PreventDefault();
+                }
+            });
+
+            sortMenuPanel = new VisualElement { name = "gitU-sort-menu-panel" };
+            sortMenuPanel.style.position = Position.Absolute;
+            sortMenuPanel.style.width = 220;
+            sortMenuPanel.style.backgroundColor = Html("#111115");
+            sortMenuPanel.style.borderTopWidth = 1;
+            sortMenuPanel.style.borderRightWidth = 1;
+            sortMenuPanel.style.borderBottomWidth = 1;
+            sortMenuPanel.style.borderLeftWidth = 1;
+            var border = Rgba(255, 255, 255, 0.12f);
+            sortMenuPanel.style.borderTopColor = border;
+            sortMenuPanel.style.borderRightColor = border;
+            sortMenuPanel.style.borderBottomColor = border;
+            sortMenuPanel.style.borderLeftColor = border;
+            sortMenuPanel.style.borderTopLeftRadius = 8;
+            sortMenuPanel.style.borderTopRightRadius = 8;
+            sortMenuPanel.style.borderBottomLeftRadius = 8;
+            sortMenuPanel.style.borderBottomRightRadius = 8;
+            sortMenuPanel.style.paddingTop = 6;
+            sortMenuPanel.style.paddingBottom = 6;
+            sortMenuPanel.style.paddingLeft = 6;
+            sortMenuPanel.style.paddingRight = 6;
+            sortMenuPanel.style.visibility = Visibility.Hidden;
+            sortMenuPanel.style.left = -10000;
+            sortMenuPanel.style.top = -10000;
+
+            sortMenuOverlay.Add(sortMenuPanel);
+            rootVisualElement.Add(sortMenuOverlay);
+        }
+
+        private void PositionSortMenuPanel()
+        {
+            if (repositoryStatusUpButton == null || sortMenuPanel == null || sortMenuOverlay == null)
+            {
+                return;
+            }
+
+            var requestId = sortMenuPositionRequestId;
+            sortMenuPanel.schedule.Execute(() =>
+            {
+                if (sortMenuPanel == null || sortMenuOverlay == null || repositoryStatusUpButton == null)
+                {
+                    return;
+                }
+
+                if (requestId != sortMenuPositionRequestId)
+                {
+                    return;
+                }
+
+                var root = sortMenuOverlay.parent ?? rootVisualElement;
+                if (root == null)
+                {
+                    return;
+                }
+
+                var rootWidth = root.resolvedStyle.width;
+                var rootHeight = root.resolvedStyle.height;
+                if (rootWidth <= 0f || rootHeight <= 0f)
+                {
+                    if (sortMenuPendingPositionAttempts++ < 20)
+                    {
+                        PositionSortMenuPanel();
+                    }
+                    return;
+                }
+
+                var anchor = repositoryStatusUpButton.worldBound;
+                if (anchor.width <= 0f || anchor.height <= 0f)
+                {
+                    if (sortMenuPendingPositionAttempts++ < 20)
+                    {
+                        PositionSortMenuPanel();
+                    }
+                    return;
+                }
+
+                // First-open layout pass may report a valid size but still sit at (0,0).
+                if (anchor.xMin <= 0.01f && anchor.yMin <= 0.01f)
+                {
+                    if (sortMenuPendingPositionAttempts++ < 20)
+                    {
+                        PositionSortMenuPanel();
+                    }
+                    return;
+                }
+
+                var panelWidth = sortMenuPanel.resolvedStyle.width;
+                var panelHeight = sortMenuPanel.resolvedStyle.height;
+                if (panelWidth <= 0f) panelWidth = 220f;
+                if (panelHeight <= 0f) panelHeight = 220f;
+
+                const float gap = 6f;
+
+                // Prefer: panel bottom-right aligns to the trigger button (above it).
+                var left = anchor.xMax - panelWidth;
+                var top = (anchor.yMin - gap) - panelHeight;
+
+                // If above would go out of view, fall back to below the button.
+                if (top < 0f)
+                {
+                    top = anchor.yMax + gap;
+                }
+
+                left = Mathf.Clamp(left, 0f, Mathf.Max(0f, rootWidth - panelWidth));
+                top = Mathf.Clamp(top, 0f, Mathf.Max(0f, rootHeight - panelHeight));
+
+                sortMenuPanel.style.left = left;
+                sortMenuPanel.style.top = top;
+                sortMenuPanel.style.visibility = Visibility.Visible;
+                sortMenuPanel.BringToFront();
+            });
+        }
+
+        private void RebuildSortMenuContents()
+        {
+            if (sortMenuPanel == null)
+            {
+                return;
+            }
+
+            sortMenuPanel.Clear();
+
+            sortMenuPanel.Add(CreateSortMenuItem("Git 状态", assetSortKey == AssetSortKey.GitStatus, () =>
+            {
+                assetSortKey = AssetSortKey.GitStatus;
+                SaveSortSettings();
+                HideSortMenu();
+                RefreshListViews();
+            }));
+            sortMenuPanel.Add(CreateSortMenuItem("资源类型", assetSortKey == AssetSortKey.AssetType, () =>
+            {
+                assetSortKey = AssetSortKey.AssetType;
+                SaveSortSettings();
+                HideSortMenu();
+                RefreshListViews();
+            }));
+            sortMenuPanel.Add(CreateSortMenuItem("名称", assetSortKey == AssetSortKey.Name, () =>
+            {
+                assetSortKey = AssetSortKey.Name;
+                SaveSortSettings();
+                HideSortMenu();
+                RefreshListViews();
+            }));
+            sortMenuPanel.Add(CreateSortMenuItem("时间", assetSortKey == AssetSortKey.Time, () =>
+            {
+                assetSortKey = AssetSortKey.Time;
+                SaveSortSettings();
+                HideSortMenu();
+                RefreshListViews();
+            }));
+            sortMenuPanel.Add(CreateSortMenuItem("路径", assetSortKey == AssetSortKey.Path, () =>
+            {
+                assetSortKey = AssetSortKey.Path;
+                SaveSortSettings();
+                HideSortMenu();
+                RefreshListViews();
+            }));
+
+            sortMenuPanel.Add(CreateSortMenuSeparator());
+
+            sortMenuPanel.Add(CreateSortMenuItem("升序", assetSortOrder == SortOrder.Ascending, () =>
+            {
+                assetSortOrder = SortOrder.Ascending;
+                SaveSortSettings();
+                HideSortMenu();
+                RefreshListViews();
+            }));
+            sortMenuPanel.Add(CreateSortMenuItem("降序", assetSortOrder == SortOrder.Descending, () =>
+            {
+                assetSortOrder = SortOrder.Descending;
+                SaveSortSettings();
+                HideSortMenu();
+                RefreshListViews();
+            }));
+        }
+
+        private VisualElement CreateSortMenuSeparator()
+        {
+            var sep = new VisualElement();
+            sep.style.height = 1;
+            sep.style.marginTop = 4;
+            sep.style.marginBottom = 4;
+            sep.style.backgroundColor = new Color(1f, 1f, 1f, 0.08f);
+            sep.pickingMode = PickingMode.Ignore;
+            return sep;
+        }
+
+        private VisualElement CreateSortMenuItem(string label, bool checkedState, Action onClick)
+        {
+            var row = new VisualElement();
+            row.style.flexDirection = FlexDirection.Row;
+            row.style.alignItems = Align.Center;
+            row.style.height = 22;
+            row.style.paddingLeft = 4;
+            row.style.paddingRight = 4;
+            row.style.borderTopLeftRadius = 4;
+            row.style.borderTopRightRadius = 4;
+            row.style.borderBottomLeftRadius = 4;
+            row.style.borderBottomRightRadius = 4;
+            row.pickingMode = PickingMode.Position;
+
+            var check = new Label(checkedState ? "✓" : string.Empty);
+            check.style.width = 16;
+            check.style.unityTextAlign = TextAnchor.MiddleCenter;
+            check.style.color = Rgb(139, 92, 246);
+            row.Add(check);
+
+            var text = new Label(label);
+            text.style.marginLeft = 8;
+            text.style.flexGrow = 1;
+            text.style.flexShrink = 1;
+            text.style.unityTextAlign = TextAnchor.MiddleLeft;
+            text.style.color = new Color(1f, 1f, 1f, 0.85f);
+            row.Add(text);
+
+            row.RegisterCallback<MouseEnterEvent>(_ => row.style.backgroundColor = new Color(1f, 1f, 1f, 0.06f));
+            row.RegisterCallback<MouseLeaveEvent>(_ => row.style.backgroundColor = Color.clear);
+            row.RegisterCallback<MouseDownEvent>(evt =>
+            {
+                if (evt.button != 0)
+                {
+                    return;
+                }
+
+                onClick?.Invoke();
+                evt.StopPropagation();
+            });
+
+            return row;
         }
 
         private void ConfigureChangeTypeButtons()
@@ -1498,7 +2032,7 @@ namespace TLNexus.GitU
 
                     if (IsItemVisibleInList(info, stagedView: true) && !ContainsByPath(visibleStagedItems, info.AssetPath))
                     {
-                        InsertSortedByPath(visibleStagedItems, info);
+                        InsertSortedByCurrentSort(visibleStagedItems, info);
                         touchedStaged = true;
                     }
                 }
@@ -1508,14 +2042,13 @@ namespace TLNexus.GitU
 
                     if (IsItemVisibleInList(info, stagedView: false) && !ContainsByPath(visibleUnstagedItems, info.AssetPath))
                     {
-                        InsertSortedByPath(visibleUnstagedItems, info);
+                        InsertSortedByCurrentSort(visibleUnstagedItems, info);
                         touchedUnstaged = true;
                     }
                 }
             }
 
-            var isEmpty = visibleUnstagedItems.Count == 0 && visibleStagedItems.Count == 0;
-            UpdateEmptyPlaceholder(isEmpty);
+            UpdateListEmptyHints();
 
             if (unstagedHeaderLabel != null)
             {
@@ -1655,6 +2188,203 @@ namespace TLNexus.GitU
             }
 
             list.Insert(lo, item);
+        }
+
+        private List<GitAssetInfo> ApplySortToAssetList(List<GitAssetInfo> list)
+        {
+            if (list == null || list.Count <= 1)
+            {
+                return list;
+            }
+
+            var indexed = list.Select((item, index) => (item, index));
+            IOrderedEnumerable<(GitAssetInfo item, int index)> ordered;
+
+            switch (assetSortKey)
+            {
+                case AssetSortKey.GitStatus:
+                    ordered = assetSortOrder == SortOrder.Ascending
+                        ? indexed.OrderBy(t => GetGitStatusSortIndex(t.item)).ThenBy(t => GetSortPath(t.item), StringComparer.OrdinalIgnoreCase)
+                        : indexed.OrderByDescending(t => GetGitStatusSortIndex(t.item)).ThenBy(t => GetSortPath(t.item), StringComparer.OrdinalIgnoreCase);
+                    break;
+                case AssetSortKey.AssetType:
+                    ordered = assetSortOrder == SortOrder.Ascending
+                        ? indexed.OrderBy(t => (int)GetOrDetectAssetType(t.item)).ThenBy(t => GetSortPath(t.item), StringComparer.OrdinalIgnoreCase)
+                        : indexed.OrderByDescending(t => (int)GetOrDetectAssetType(t.item)).ThenBy(t => GetSortPath(t.item), StringComparer.OrdinalIgnoreCase);
+                    break;
+                case AssetSortKey.Name:
+                    ordered = assetSortOrder == SortOrder.Ascending
+                        ? indexed.OrderBy(t => GetSortName(t.item), StringComparer.OrdinalIgnoreCase).ThenBy(t => GetSortPath(t.item), StringComparer.OrdinalIgnoreCase)
+                        : indexed.OrderByDescending(t => GetSortName(t.item), StringComparer.OrdinalIgnoreCase).ThenBy(t => GetSortPath(t.item), StringComparer.OrdinalIgnoreCase);
+                    break;
+                case AssetSortKey.Time:
+                    ordered = assetSortOrder == SortOrder.Ascending
+                        ? indexed.OrderBy(t => GetSortTimeTicks(t.item)).ThenBy(t => GetSortPath(t.item), StringComparer.OrdinalIgnoreCase)
+                        : indexed.OrderByDescending(t => GetSortTimeTicks(t.item)).ThenBy(t => GetSortPath(t.item), StringComparer.OrdinalIgnoreCase);
+                    break;
+                case AssetSortKey.Path:
+                default:
+                    ordered = assetSortOrder == SortOrder.Ascending
+                        ? indexed.OrderBy(t => GetSortPath(t.item), StringComparer.OrdinalIgnoreCase)
+                        : indexed.OrderByDescending(t => GetSortPath(t.item), StringComparer.OrdinalIgnoreCase);
+                    break;
+            }
+
+            // Ensure stability when keys are identical.
+            var sorted = ordered.ThenBy(t => t.index).Select(t => t.item).ToList();
+            return sorted;
+        }
+
+        private void InsertSortedByCurrentSort(List<GitAssetInfo> list, GitAssetInfo item)
+        {
+            if (list == null || item == null)
+            {
+                return;
+            }
+
+            if (assetSortKey == AssetSortKey.Path && assetSortOrder == SortOrder.Ascending)
+            {
+                InsertSortedByPath(list, item);
+                return;
+            }
+
+            var insertIndex = list.Count;
+            for (var i = 0; i < list.Count; i++)
+            {
+                if (CompareAssetInfosForSort(item, list[i]) < 0)
+                {
+                    insertIndex = i;
+                    break;
+                }
+            }
+
+            list.Insert(insertIndex, item);
+        }
+
+        private int CompareAssetInfosForSort(GitAssetInfo a, GitAssetInfo b)
+        {
+            if (ReferenceEquals(a, b))
+            {
+                return 0;
+            }
+
+            if (a == null)
+            {
+                return 1;
+            }
+
+            if (b == null)
+            {
+                return -1;
+            }
+
+            var cmp = 0;
+            switch (assetSortKey)
+            {
+                case AssetSortKey.GitStatus:
+                    cmp = GetGitStatusSortIndex(a).CompareTo(GetGitStatusSortIndex(b));
+                    break;
+                case AssetSortKey.AssetType:
+                    cmp = ((int)GetOrDetectAssetType(a)).CompareTo((int)GetOrDetectAssetType(b));
+                    break;
+                case AssetSortKey.Name:
+                    cmp = string.Compare(GetSortName(a), GetSortName(b), StringComparison.OrdinalIgnoreCase);
+                    break;
+                case AssetSortKey.Time:
+                    cmp = GetSortTimeTicks(a).CompareTo(GetSortTimeTicks(b));
+                    break;
+                case AssetSortKey.Path:
+                default:
+                    cmp = string.Compare(GetSortPath(a), GetSortPath(b), StringComparison.OrdinalIgnoreCase);
+                    break;
+            }
+
+            if (cmp == 0)
+            {
+                cmp = string.Compare(GetSortPath(a), GetSortPath(b), StringComparison.OrdinalIgnoreCase);
+            }
+
+            if (cmp == 0)
+            {
+                cmp = string.Compare(a.OriginalPath ?? string.Empty, b.OriginalPath ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+            }
+
+            if (assetSortOrder == SortOrder.Descending)
+            {
+                cmp = -cmp;
+            }
+
+            return cmp;
+        }
+
+        private static int GetGitStatusSortIndex(GitAssetInfo info)
+        {
+            if (info == null)
+            {
+                return int.MaxValue;
+            }
+
+            return info.ChangeType switch
+            {
+                GitChangeType.Added => 0,
+                GitChangeType.Modified => 1,
+                GitChangeType.Deleted => 2,
+                GitChangeType.Renamed => 3,
+                _ => 4
+            };
+        }
+
+        private UnityAssetTypeFilter GetOrDetectAssetType(GitAssetInfo info)
+        {
+            if (info == null)
+            {
+                return UnityAssetTypeFilter.Unknown;
+            }
+
+            var path = GetSortPath(info);
+            if (string.IsNullOrEmpty(path))
+            {
+                return UnityAssetTypeFilter.Unknown;
+            }
+
+            if (!assetTypeCache.TryGetValue(path, out var cached))
+            {
+                cached = GitUtility.DetectAssetTypeFilter(path);
+                assetTypeCache[path] = cached;
+            }
+
+            return cached;
+        }
+
+        private static string GetSortPath(GitAssetInfo info)
+        {
+            if (info == null)
+            {
+                return string.Empty;
+            }
+
+            return info.AssetPath ?? info.OriginalPath ?? string.Empty;
+        }
+
+        private static string GetSortName(GitAssetInfo info)
+        {
+            if (info == null)
+            {
+                return string.Empty;
+            }
+
+            return info.FileName ?? string.Empty;
+        }
+
+        private static long GetSortTimeTicks(GitAssetInfo info)
+        {
+            if (info == null)
+            {
+                return long.MinValue;
+            }
+
+            var time = info.WorkingTreeTime ?? info.LastCommitTime ?? DateTime.MinValue;
+            return time.Ticks;
         }
 
         private IEnumerable<GitAssetInfo> EnumerateFilteredAssets()
@@ -2368,6 +3098,7 @@ namespace TLNexus.GitU
             historyListView.itemsSource = commitHistory;
             historyListView.RefreshItems();
             historyListView.ClearSelection();
+            UpdateHistoryDropdownLayout();
         }
 
         private void HideHistoryDropdown()
@@ -2570,7 +3301,7 @@ namespace TLNexus.GitU
         {
             try
             {
-                fallbackCommitHistory = GitUtility.GetRecentCommitMessagesForCurrentUser(MaxCommitHistoryEntries) ?? new List<string>();
+                fallbackCommitHistory = GitUtility.GetRecentCommitMessagesForCurrentUser(MaxCommitHistoryDisplayEntries) ?? new List<string>();
             }
             catch (Exception ex)
             {
@@ -2589,7 +3320,7 @@ namespace TLNexus.GitU
             List<string> myMessages;
             try
             {
-                myMessages = GitUtility.GetRecentCommitMessagesForCurrentUser(500);
+                myMessages = GitUtility.GetRecentCommitMessagesForCurrentUser(Mathf.Max(500, MaxCommitHistoryDisplayEntries));
             }
             catch
             {
@@ -2603,11 +3334,29 @@ namespace TLNexus.GitU
             }
 
             var mine = new HashSet<string>(myMessages, StringComparer.Ordinal);
-            savedCommitHistory.RemoveAll(entry => !mine.Contains(entry));
+            savedCommitHistory.RemoveAll(entry => !mine.Contains(GetCommitSubject(entry)));
             if (savedCommitHistory.Count > MaxCommitHistoryEntries)
             {
                 savedCommitHistory.RemoveRange(MaxCommitHistoryEntries, savedCommitHistory.Count - MaxCommitHistoryEntries);
             }
+        }
+
+        private static string GetCommitSubject(string message)
+        {
+            if (string.IsNullOrWhiteSpace(message))
+            {
+                return string.Empty;
+            }
+
+            var trimmed = message.Trim();
+            if (trimmed.Length == 0)
+            {
+                return string.Empty;
+            }
+
+            var newlineIndex = trimmed.IndexOfAny(new[] { '\r', '\n' });
+            var subject = newlineIndex >= 0 ? trimmed.Substring(0, newlineIndex) : trimmed;
+            return subject.Trim();
         }
 
         private void RebuildCommitHistoryDisplay()
@@ -2621,6 +3370,7 @@ namespace TLNexus.GitU
 
             if (savedCommitHistory != null)
             {
+                var existingSubjects = new HashSet<string>(StringComparer.Ordinal);
                 foreach (var entry in savedCommitHistory)
                 {
                     if (string.IsNullOrWhiteSpace(entry))
@@ -2628,13 +3378,50 @@ namespace TLNexus.GitU
                         continue;
                     }
 
-                    if (commitHistory.Count >= MaxCommitHistoryEntries)
+                    var full = entry.Trim();
+                    var subject = GetCommitSubject(full);
+                    if (subject.Length == 0 || existingSubjects.Contains(subject))
+                    {
+                        continue;
+                    }
+
+                    if (commitHistory.Count >= MaxCommitHistoryDisplayEntries)
                     {
                         return;
                     }
 
-                    commitHistory.Add(entry.Trim());
+                    existingSubjects.Add(subject);
+                    commitHistory.Add(full);
                 }
+
+                if (fallbackCommitHistory == null || fallbackCommitHistory.Count == 0)
+                {
+                    return;
+                }
+
+                foreach (var entry in fallbackCommitHistory)
+                {
+                    if (string.IsNullOrWhiteSpace(entry))
+                    {
+                        continue;
+                    }
+
+                    var trimmed = entry.Trim();
+                    var subject = GetCommitSubject(trimmed);
+                    if (subject.Length == 0 || existingSubjects.Contains(subject))
+                    {
+                        continue;
+                    }
+
+                    commitHistory.Add(trimmed);
+                    existingSubjects.Add(subject);
+                    if (commitHistory.Count >= MaxCommitHistoryDisplayEntries)
+                    {
+                        return;
+                    }
+                }
+
+                return;
             }
 
             if (fallbackCommitHistory == null || fallbackCommitHistory.Count == 0)
@@ -2642,7 +3429,7 @@ namespace TLNexus.GitU
                 return;
             }
 
-            var existing = new HashSet<string>(commitHistory, StringComparer.Ordinal);
+            var existing = new HashSet<string>(commitHistory.Select(GetCommitSubject), StringComparer.Ordinal);
             foreach (var entry in fallbackCommitHistory)
             {
                 if (string.IsNullOrWhiteSpace(entry))
@@ -2651,13 +3438,15 @@ namespace TLNexus.GitU
                 }
 
                 var trimmed = entry.Trim();
-                if (existing.Contains(trimmed))
+                var subject = GetCommitSubject(trimmed);
+                if (subject.Length == 0 || existing.Contains(subject))
                 {
                     continue;
                 }
 
                 commitHistory.Add(trimmed);
-                if (commitHistory.Count >= MaxCommitHistoryEntries)
+                existing.Add(subject);
+                if (commitHistory.Count >= MaxCommitHistoryDisplayEntries)
                 {
                     return;
                 }
@@ -2709,16 +3498,15 @@ namespace TLNexus.GitU
 
             EnsureCommitHistoryLoaded();
             var trimmed = message.Trim();
-            var newlineIndex = trimmed.IndexOfAny(new[] { '\r', '\n' });
-            var historyEntry = newlineIndex >= 0 ? trimmed.Substring(0, newlineIndex).Trim() : trimmed;
-            if (string.IsNullOrWhiteSpace(historyEntry))
+            var subject = GetCommitSubject(trimmed);
+            if (string.IsNullOrWhiteSpace(subject))
             {
                 return;
             }
 
             savedCommitHistory ??= new List<string>();
-            savedCommitHistory.RemoveAll(entry => string.Equals(entry, historyEntry, StringComparison.Ordinal));
-            savedCommitHistory.Insert(0, historyEntry);
+            savedCommitHistory.RemoveAll(entry => string.Equals(GetCommitSubject(entry), subject, StringComparison.Ordinal));
+            savedCommitHistory.Insert(0, trimmed);
             if (savedCommitHistory.Count > MaxCommitHistoryEntries)
             {
                 savedCommitHistory.RemoveRange(MaxCommitHistoryEntries, savedCommitHistory.Count - MaxCommitHistoryEntries);
@@ -2773,16 +3561,16 @@ namespace TLNexus.GitU
                 }
             }
 
-            if (preexistingStagedCount > 0)
-            {
-                var confirmed = EditorUtility.DisplayDialog(
-                    "安全确认",
-                    $"将提交 {stagedPathsNow.Count} 个待提交条目，其中 {preexistingStagedCount} 个在打开窗口前就已暂存。\n\n是否继续提交？",
-                    "继续提交",
-                    "取消");
-
-                if (!confirmed)
+                if (preexistingStagedCount > 0)
                 {
+                    var confirmed = EditorUtility.DisplayDialog(
+                        "安全确认",
+                        $"将提交 {stagedPathsNow.Count} 个待提交条目。\n\n是否继续提交？",
+                        "继续提交",
+                        "取消");
+
+                    if (!confirmed)
+                    {
                     return;
                 }
             }
@@ -2887,8 +3675,8 @@ namespace TLNexus.GitU
             var unstagedScrollOffset = unstagedScroll?.scrollOffset ?? Vector2.zero;
             var stagedScrollOffset = stagedScroll?.scrollOffset ?? Vector2.zero;
 
-            var unstaged = EnumerateFilteredAssets(false).ToList();
-            var staged = EnumerateFilteredAssets(true).ToList();
+            var unstaged = ApplySortToAssetList(EnumerateFilteredAssets(false).ToList());
+            var staged = ApplySortToAssetList(EnumerateFilteredAssets(true).ToList());
 
             var validUnstaged = new HashSet<string>(unstaged.Select(i => i.AssetPath), StringComparer.OrdinalIgnoreCase);
             foreach (var path in selectedUnstagedPaths.ToList())
@@ -2918,13 +3706,12 @@ namespace TLNexus.GitU
                 stagedHeaderLabel.text = $"\u5f85\u63d0\u4ea4\uff08\u5df2\u6682\u5b58\uff09\uff1a{staged.Count} \u9879";
             }
 
-            var isEmpty = unstaged.Count == 0 && staged.Count == 0;
-            UpdateEmptyPlaceholder(isEmpty);
-
             visibleUnstagedItems.Clear();
             visibleUnstagedItems.AddRange(unstaged);
             visibleStagedItems.Clear();
             visibleStagedItems.AddRange(staged);
+
+            UpdateListEmptyHints();
 
             UpdateListView(unstagedScrollView, visibleUnstagedItems, ref lastUnstagedVisibleCount);
             UpdateListView(stagedScrollView, visibleStagedItems, ref lastStagedVisibleCount);
@@ -2941,29 +3728,6 @@ namespace TLNexus.GitU
             }
         }
 
-        private void AddEmptyPlaceholderLabel(VisualElement target, string message)
-        {
-            if (target == null)
-            {
-                return;
-            }
-
-            var container = new VisualElement();
-            container.style.flexGrow = 1f;
-            container.style.flexDirection = FlexDirection.Column;
-            container.style.justifyContent = Justify.Center;
-
-            var label = new Label(message);
-            label.style.unityTextAlign = TextAnchor.MiddleCenter;
-            label.style.color = new Color(1f, 1f, 1f, 0.6f);
-            label.style.alignSelf = Align.Center;
-            label.style.marginTop = 0;
-            label.style.marginBottom = 0;
-
-            container.Add(label);
-            target.Add(container);
-        }
-
         private void EnsureAssetListViewsConfigured()
         {
             if (assetListViewsConfigured)
@@ -2976,10 +3740,11 @@ namespace TLNexus.GitU
                 return;
             }
 
-            EnsureEmptyPlaceholderCreated();
-
             ConfigureAssetListView(unstagedScrollView, stagedView: false);
             ConfigureAssetListView(stagedScrollView, stagedView: true);
+
+            RegisterListDropTarget(unstagedScrollView, unstagedListContainer, unstagedEmptyHintOverlay, targetStaged: false);
+            RegisterListDropTarget(stagedScrollView, stagedListContainer, stagedEmptyHintOverlay, targetStaged: true);
 
             unstagedScrollView.itemsSource = visibleUnstagedItems;
             stagedScrollView.itemsSource = visibleStagedItems;
@@ -2987,48 +3752,45 @@ namespace TLNexus.GitU
             assetListViewsConfigured = true;
         }
 
-        private void EnsureEmptyPlaceholderCreated()
+        private void RegisterListDropTarget(ListView listView, VisualElement container, VisualElement emptyOverlay, bool targetStaged)
         {
-            if (emptyPlaceholderLabel != null || leftColumn == null)
+            if (listView != null)
             {
-                return;
+                listView.RegisterCallback<DragUpdatedEvent>(evt => OnListDragUpdated(evt, targetStaged), TrickleDown.TrickleDown);
+                listView.RegisterCallback<DragPerformEvent>(evt => OnListDragPerform(evt, targetStaged), TrickleDown.TrickleDown);
             }
 
-            emptyPlaceholderLabel = new Label();
-            emptyPlaceholderLabel.style.flexGrow = 1f;
-            emptyPlaceholderLabel.style.unityTextAlign = TextAnchor.MiddleCenter;
-            emptyPlaceholderLabel.style.color = new Color(1f, 1f, 1f, 0.6f);
-            emptyPlaceholderLabel.style.display = DisplayStyle.None;
+            if (container != null)
+            {
+                container.RegisterCallback<DragUpdatedEvent>(evt => OnListDragUpdated(evt, targetStaged), TrickleDown.TrickleDown);
+                container.RegisterCallback<DragPerformEvent>(evt => OnListDragPerform(evt, targetStaged), TrickleDown.TrickleDown);
+            }
 
-            var insertIndex = 1;
-            if (insertIndex < 0) insertIndex = 0;
-            if (insertIndex > leftColumn.childCount) insertIndex = leftColumn.childCount;
-            leftColumn.Insert(insertIndex, emptyPlaceholderLabel);
+            if (emptyOverlay != null)
+            {
+                emptyOverlay.RegisterCallback<DragUpdatedEvent>(evt => OnListDragUpdated(evt, targetStaged), TrickleDown.TrickleDown);
+                emptyOverlay.RegisterCallback<DragPerformEvent>(evt => OnListDragPerform(evt, targetStaged), TrickleDown.TrickleDown);
+            }
+
+            var scrollView = listView?.Q<ScrollView>();
+            if (scrollView != null)
+            {
+                scrollView.RegisterCallback<DragUpdatedEvent>(evt => OnListDragUpdated(evt, targetStaged), TrickleDown.TrickleDown);
+                scrollView.RegisterCallback<DragPerformEvent>(evt => OnListDragPerform(evt, targetStaged), TrickleDown.TrickleDown);
+            }
         }
 
-        private void UpdateEmptyPlaceholder(bool isEmpty)
+        private void UpdateListEmptyHints()
         {
-            if (emptyPlaceholderLabel == null)
+            if (unstagedEmptyHintOverlay != null)
             {
-                return;
+                unstagedEmptyHintOverlay.style.display = visibleUnstagedItems.Count == 0 ? DisplayStyle.Flex : DisplayStyle.None;
             }
 
-            if (!isEmpty)
+            if (stagedEmptyHintOverlay != null)
             {
-                emptyPlaceholderLabel.style.display = DisplayStyle.None;
-                if (unstagedScrollView != null) unstagedScrollView.style.display = DisplayStyle.Flex;
-                if (stagedScrollView != null) stagedScrollView.style.display = DisplayStyle.Flex;
-                return;
+                stagedEmptyHintOverlay.style.display = visibleStagedItems.Count == 0 ? DisplayStyle.Flex : DisplayStyle.None;
             }
-
-            var message = string.IsNullOrEmpty(statusMessage)
-                ? "Git 未检测到可显示的变更。"
-                : statusMessage;
-
-            emptyPlaceholderLabel.text = message;
-            emptyPlaceholderLabel.style.display = DisplayStyle.Flex;
-            if (unstagedScrollView != null) unstagedScrollView.style.display = DisplayStyle.None;
-            if (stagedScrollView != null) stagedScrollView.style.display = DisplayStyle.None;
         }
 
         private void ConfigureAssetListView(ListView listView, bool stagedView)
@@ -3045,8 +3807,7 @@ namespace TLNexus.GitU
             listView.makeItem = () => CreateAssetRowTemplate(stagedView);
             listView.bindItem = (e, i) => BindAssetRow(e, i, stagedView);
 
-            listView.RegisterCallback<DragUpdatedEvent>(evt => OnListDragUpdated(evt, stagedView));
-            listView.RegisterCallback<DragPerformEvent>(evt => OnListDragPerform(evt, stagedView));
+            // Drop targets are registered in EnsureAssetListViewsConfigured so they also work when the list is empty.
         }
 
         private void UpdateListView(ListView listView, List<GitAssetInfo> items, ref int lastCount)
@@ -3287,7 +4048,7 @@ namespace TLNexus.GitU
                 container.style.backgroundColor = Color.clear;
             });
 
-            row.RegisterCallback<MouseDownEvent>(evt =>
+            row.RegisterCallback<PointerDownEvent>(evt =>
             {
                 if (evt.button == 1)
                 {
@@ -3314,18 +4075,17 @@ namespace TLNexus.GitU
                 HandleRowSelection(stagedView, refs.Info, refs.BoundIndex, evt.shiftKey, evt.actionKey);
 
                 refs.DragArmed = true;
-                refs.DragStartPosition = new Vector3(evt.mousePosition.x, evt.mousePosition.y, 0f);
-                refs.DragPointerId = 0;
+                refs.DragStartPosition = new Vector3(evt.position.x, evt.position.y, 0f);
             });
 
-            row.RegisterCallback<MouseMoveEvent>(evt =>
+            row.RegisterCallback<PointerMoveEvent>(evt =>
             {
                 if (!refs.DragArmed || (evt.pressedButtons & 1) == 0)
                 {
                     return;
                 }
 
-                var position = new Vector3(evt.mousePosition.x, evt.mousePosition.y, 0f);
+                var position = new Vector3(evt.position.x, evt.position.y, 0f);
                 var delta = position - refs.DragStartPosition;
                 if (delta.sqrMagnitude < 64f)
                 {
@@ -3334,7 +4094,22 @@ namespace TLNexus.GitU
 
                 refs.DragArmed = false;
 
-                TryStartDrag(stagedView, refs.Info, refs.BoundIndex);
+                var dragEvent = evt.imguiEvent;
+                if (dragEvent == null || dragEvent.type != EventType.MouseDrag)
+                {
+                    dragEvent = new Event { type = EventType.MouseDrag };
+                }
+
+                var previousEvent = Event.current;
+                try
+                {
+                    Event.current = dragEvent;
+                    TryStartDrag(stagedView, refs.Info, refs.BoundIndex);
+                }
+                finally
+                {
+                    Event.current = previousEvent;
+                }
             });
 
             row.RegisterCallback<MouseUpEvent>(_ =>
@@ -3342,7 +4117,7 @@ namespace TLNexus.GitU
                 refs.DragArmed = false;
             });
 
-            row.RegisterCallback<ContextualMenuPopulateEvent>(evt =>
+            container.AddManipulator(new ContextualMenuManipulator(evt =>
             {
                 var info = refs.Info;
                 if (info == null || string.IsNullOrEmpty(info.AssetPath))
@@ -3356,13 +4131,34 @@ namespace TLNexus.GitU
                     HandleRowSelection(stagedView, info, refs.BoundIndex, shift: false, actionKey: false);
                 }
 
+                if (stagedView)
+                {
+                    evt.menu.AppendAction(
+                        "\u4ece\u5f85\u63d0\u4ea4\u79fb\u51fa",
+                        _ => UnstageSelectedStaged(),
+                        _ => selectedStagedPaths.Count > 0
+                            ? DropdownMenuAction.Status.Normal
+                            : DropdownMenuAction.Status.Disabled);
+                }
+                else
+                {
+                    evt.menu.AppendAction(
+                        "\u53d1\u9001\u81f3\u5f85\u63d0\u4ea4",
+                        _ => StageSelectedUnstaged(),
+                        _ => selectedUnstagedPaths.Count > 0
+                            ? DropdownMenuAction.Status.Normal
+                            : DropdownMenuAction.Status.Disabled);
+                }
+
+                evt.menu.AppendSeparator();
+
                 evt.menu.AppendAction(
                     "\u653e\u5f03\u66f4\u6539",
                     _ => ConfirmDiscardSelected(stagedView),
                     _ => (stagedView ? selectedStagedPaths.Count : selectedUnstagedPaths.Count) > 0
                         ? DropdownMenuAction.Status.Normal
                         : DropdownMenuAction.Status.Disabled);
-            });
+            }));
 
             nameLabel.RegisterCallback<ClickEvent>(evt =>
             {
@@ -3623,7 +4419,18 @@ namespace TLNexus.GitU
                 SourceStaged = sourceStaged,
                 AssetPaths = selectedPaths
             });
-            DragAndDrop.objectReferences = Array.Empty<UnityEngine.Object>();
+
+            var draggedObjects = new List<UnityEngine.Object>(selectedPaths.Count);
+            foreach (var path in selectedPaths)
+            {
+                var asset = string.IsNullOrEmpty(path) ? null : AssetDatabase.LoadMainAssetAtPath(path);
+                if (asset != null)
+                {
+                    draggedObjects.Add(asset);
+                }
+            }
+            DragAndDrop.objectReferences = draggedObjects.Count > 0 ? draggedObjects.ToArray() : Array.Empty<UnityEngine.Object>();
+
             DragAndDrop.StartDrag(string.IsNullOrEmpty(info.FileName) ? "GitU" : info.FileName);
         }
 
