@@ -114,6 +114,7 @@ namespace TLNexus.GitU
         private readonly HashSet<string> selectedStagedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private HashSet<string> initialStagedPaths;
         private bool hasShownPreexistingStagedHint;
+        private bool hasAutoStagedModifiedFiles;
         private readonly HashSet<string> stagedAllowList = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private bool autoCleanExternalStagedOnOpen;
         private bool hasAutoCleanedExternalStagedOnOpen;
@@ -2078,18 +2079,18 @@ namespace TLNexus.GitU
                 return;
             }
 
-            button.style.opacity = enabled ? 1f : 0.35f;
-            button.style.color = accentColor;
+            button.style.opacity = 1f;
+            button.style.color = enabled ? accentColor : new Color(1f, 1f, 1f, 0.6f);
             button.style.backgroundColor = enabled
                 ? new Color(accentColor.r, accentColor.g, accentColor.b, 0.10f)
-                : new Color(0.12f, 0.12f, 0.12f, 0.35f);
+                : new Color(1f, 1f, 1f, 0.06f);
             button.style.borderTopWidth = 1;
             button.style.borderRightWidth = 1;
             button.style.borderBottomWidth = 1;
             button.style.borderLeftWidth = 1;
             var borderColor = enabled
                 ? new Color(accentColor.r, accentColor.g, accentColor.b, 0.75f)
-                : new Color(1f, 1f, 1f, 0.08f);
+                : new Color(1f, 1f, 1f, 0.12f);
             button.style.borderTopColor = borderColor;
             button.style.borderRightColor = borderColor;
             button.style.borderBottomColor = borderColor;
@@ -3125,6 +3126,30 @@ namespace TLNexus.GitU
         private void ApplyGitChanges(List<GitChangeEntry> changes, List<string> infoMessages)
         {
             gitChanges = changes ?? new List<GitChangeEntry>();
+
+            // 检测同时是 staged 和 unstaged 的文件（已暂存但又被修改），自动将新修改也暂存
+            // 只在第一次刷新时执行，防止无限循环
+            if (!hasAutoStagedModifiedFiles)
+            {
+                var modifiedStagedPaths = gitChanges
+                    .Where(c => c.IsStaged && c.IsUnstaged)
+                    .Select(c => c.Path)
+                    .Where(p => !string.IsNullOrEmpty(p))
+                    .ToList();
+
+                if (modifiedStagedPaths.Count > 0)
+                {
+                    hasAutoStagedModifiedFiles = true;
+                    var gitRoot = GitUtility.ProjectRoot;
+                    if (!string.IsNullOrEmpty(gitRoot))
+                    {
+                        GitUtility.AutoStageModifiedStagedFiles(gitRoot, modifiedStagedPaths);
+                        // 重新刷新以获取最新状态
+                        RequestRefreshData(false);
+                        return;
+                    }
+                }
+            }
 
             if (gitChanges.Count == 0)
             {

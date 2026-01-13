@@ -751,6 +751,47 @@ namespace TLNexus.GitU
             return succeeded > 0;
         }
 
+        /// <summary>
+        /// 自动暂存那些已经在暂存区但又被修改的文件，使待提交区保持最新状态。
+        /// </summary>
+        /// <param name="gitRoot">Git 根目录</param>
+        /// <param name="unityPaths">Unity 相对路径列表（如 Assets/Editor/GitU/xxx.cs）</param>
+        internal static bool AutoStageModifiedStagedFiles(string gitRoot, IReadOnlyList<string> unityPaths)
+        {
+            if (unityPaths == null || unityPaths.Count == 0)
+            {
+                return true;
+            }
+
+            var gitPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var unityPath in unityPaths)
+            {
+                var trimmed = unityPath?.Trim();
+                if (string.IsNullOrEmpty(trimmed))
+                {
+                    continue;
+                }
+
+                // 将 Unity 路径转换为 git 相对路径
+                var gitPath = ConvertUnityPathToGitPath(trimmed);
+                if (!string.IsNullOrEmpty(gitPath))
+                {
+                    gitPaths.Add(gitPath);
+                }
+            }
+
+            if (gitPaths.Count == 0)
+            {
+                return true;
+            }
+
+            var succeeded = 0;
+            var firstError = string.Empty;
+            TryRunGitPathCommandsBatched(gitRoot, "add", gitPaths, ref succeeded, ref firstError);
+
+            return succeeded > 0;
+        }
+
         internal static bool UnstageGitPaths(string gitRoot, IReadOnlyList<string> gitRelativePaths, out string summary)
         {
             summary = string.Empty;

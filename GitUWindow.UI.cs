@@ -113,19 +113,20 @@ namespace TLNexus.GitU
                 return;
             }
 
+            var defaultBorder = Rgba(255, 255, 255, 0.04f);
             input.style.backgroundColor = Rgba(0, 0, 0, 0.35f);
             input.style.borderTopLeftRadius = 4;
             input.style.borderTopRightRadius = 4;
             input.style.borderBottomRightRadius = 4;
             input.style.borderBottomLeftRadius = 4;
-            input.style.borderTopWidth = 0;
-            input.style.borderRightWidth = 0;
-            input.style.borderBottomWidth = 0;
-            input.style.borderLeftWidth = 0;
-            input.style.borderTopColor = Color.clear;
-            input.style.borderRightColor = Color.clear;
-            input.style.borderBottomColor = Color.clear;
-            input.style.borderLeftColor = Color.clear;
+            input.style.borderTopWidth = 1;
+            input.style.borderRightWidth = 1;
+            input.style.borderBottomWidth = 1;
+            input.style.borderLeftWidth = 1;
+            input.style.borderTopColor = defaultBorder;
+            input.style.borderRightColor = defaultBorder;
+            input.style.borderBottomColor = defaultBorder;
+            input.style.borderLeftColor = defaultBorder;
             input.style.paddingLeft = 8;
             input.style.paddingRight = 8;
             input.style.height = 22;
@@ -138,36 +139,32 @@ namespace TLNexus.GitU
             input.Query<TextElement>().ForEach(e => e.style.fontSize = 10);
             input.style.fontSize = 10;
 
-            void SetFocusedBorder(bool focused)
+            var accentColor = Rgb(57, 209, 157);
+            bool isFocused = false;
+            bool isHovered = false;
+
+            void UpdateBorder()
             {
-                if (focused)
+                if (isFocused || isHovered)
                 {
-                    input.style.borderTopWidth = 1;
-                    input.style.borderRightWidth = 1;
-                    input.style.borderBottomWidth = 1;
-                    input.style.borderLeftWidth = 1;
-                    var c = Rgb(57, 209, 157);
-                    input.style.borderTopColor = c;
-                    input.style.borderRightColor = c;
-                    input.style.borderBottomColor = c;
-                    input.style.borderLeftColor = c;
+                    input.style.borderTopColor = accentColor;
+                    input.style.borderRightColor = accentColor;
+                    input.style.borderBottomColor = accentColor;
+                    input.style.borderLeftColor = accentColor;
                 }
                 else
                 {
-                    input.style.borderTopWidth = 0;
-                    input.style.borderRightWidth = 0;
-                    input.style.borderBottomWidth = 0;
-                    input.style.borderLeftWidth = 0;
-                    input.style.borderTopColor = Color.clear;
-                    input.style.borderRightColor = Color.clear;
-                    input.style.borderBottomColor = Color.clear;
-                    input.style.borderLeftColor = Color.clear;
+                    input.style.borderTopColor = defaultBorder;
+                    input.style.borderRightColor = defaultBorder;
+                    input.style.borderBottomColor = defaultBorder;
+                    input.style.borderLeftColor = defaultBorder;
                 }
             }
 
-            SetFocusedBorder(false);
-            field.RegisterCallback<FocusInEvent>(_ => SetFocusedBorder(true));
-            field.RegisterCallback<FocusOutEvent>(_ => SetFocusedBorder(false));
+            field.RegisterCallback<FocusInEvent>(_ => { isFocused = true; UpdateBorder(); });
+            field.RegisterCallback<FocusOutEvent>(_ => { isFocused = false; UpdateBorder(); });
+            field.RegisterCallback<MouseEnterEvent>(_ => { isHovered = true; UpdateBorder(); });
+            field.RegisterCallback<MouseLeaveEvent>(_ => { isHovered = false; UpdateBorder(); });
         }
 
         private static void ApplyCommitFieldInternals(TextField field)
@@ -189,19 +186,20 @@ namespace TLNexus.GitU
                 return;
             }
 
+            var defaultBorder = Rgba(255, 255, 255, 0.04f);
             input.style.backgroundColor = Rgba(0, 0, 0, 0.35f);
             input.style.borderTopLeftRadius = 4;
             input.style.borderTopRightRadius = 4;
             input.style.borderBottomRightRadius = 4;
             input.style.borderBottomLeftRadius = 4;
-            input.style.borderTopWidth = 0;
-            input.style.borderRightWidth = 0;
-            input.style.borderBottomWidth = 0;
-            input.style.borderLeftWidth = 0;
-            input.style.borderTopColor = Color.clear;
-            input.style.borderRightColor = Color.clear;
-            input.style.borderBottomColor = Color.clear;
-            input.style.borderLeftColor = Color.clear;
+            input.style.borderTopWidth = 1;
+            input.style.borderRightWidth = 1;
+            input.style.borderBottomWidth = 1;
+            input.style.borderLeftWidth = 1;
+            input.style.borderTopColor = defaultBorder;
+            input.style.borderRightColor = defaultBorder;
+            input.style.borderBottomColor = defaultBorder;
+            input.style.borderLeftColor = defaultBorder;
             input.style.paddingLeft = 8;
             input.style.paddingRight = 8;
             input.style.paddingTop = 6;
@@ -220,36 +218,32 @@ namespace TLNexus.GitU
             input.Query<TextElement>().ForEach(e => e.style.fontSize = 12);
             input.style.fontSize = 12;
 
-            void SetFocusedBorder(bool focused)
+            var accentColor = Rgb(57, 209, 157);
+            bool isFocused = false;
+            bool isHovered = false;
+
+            void UpdateBorder()
             {
-                if (focused)
+                if (isFocused || isHovered)
                 {
-                    input.style.borderTopWidth = 1;
-                    input.style.borderRightWidth = 1;
-                    input.style.borderBottomWidth = 1;
-                    input.style.borderLeftWidth = 1;
-                    var c = Rgb(57, 209, 157);
-                    input.style.borderTopColor = c;
-                    input.style.borderRightColor = c;
-                    input.style.borderBottomColor = c;
-                    input.style.borderLeftColor = c;
+                    input.style.borderTopColor = accentColor;
+                    input.style.borderRightColor = accentColor;
+                    input.style.borderBottomColor = accentColor;
+                    input.style.borderLeftColor = accentColor;
                 }
                 else
                 {
-                    input.style.borderTopWidth = 0;
-                    input.style.borderRightWidth = 0;
-                    input.style.borderBottomWidth = 0;
-                    input.style.borderLeftWidth = 0;
-                    input.style.borderTopColor = Color.clear;
-                    input.style.borderRightColor = Color.clear;
-                    input.style.borderBottomColor = Color.clear;
-                    input.style.borderLeftColor = Color.clear;
+                    input.style.borderTopColor = defaultBorder;
+                    input.style.borderRightColor = defaultBorder;
+                    input.style.borderBottomColor = defaultBorder;
+                    input.style.borderLeftColor = defaultBorder;
                 }
             }
 
-            SetFocusedBorder(false);
-            field.RegisterCallback<FocusInEvent>(_ => SetFocusedBorder(true));
-            field.RegisterCallback<FocusOutEvent>(_ => SetFocusedBorder(false));
+            field.RegisterCallback<FocusInEvent>(_ => { isFocused = true; UpdateBorder(); });
+            field.RegisterCallback<FocusOutEvent>(_ => { isFocused = false; UpdateBorder(); });
+            field.RegisterCallback<MouseEnterEvent>(_ => { isHovered = true; UpdateBorder(); });
+            field.RegisterCallback<MouseLeaveEvent>(_ => { isHovered = false; UpdateBorder(); });
         }
 
         private static void ApplyTargetFieldInternals(ObjectField field)
@@ -357,6 +351,7 @@ namespace TLNexus.GitU
                 refreshButtonElement.style.borderBottomWidth = 1;
                 refreshButtonElement.style.borderLeftWidth = 1;
                 var refreshBorder = Rgba(255, 255, 255, 0.12f);
+                var refreshAccentColor = new Color(57f / 255f, 209f / 255f, 157f / 255f, 1f);
                 refreshButtonElement.style.borderTopColor = refreshBorder;
                 refreshButtonElement.style.borderRightColor = refreshBorder;
                 refreshButtonElement.style.borderBottomColor = refreshBorder;
@@ -371,6 +366,20 @@ namespace TLNexus.GitU
                 refreshButtonElement.style.marginLeft = 2;
                 refreshButtonElement.style.paddingRight = 2;
                 refreshButtonElement.style.paddingLeft = 2;
+                refreshButtonElement.RegisterCallback<MouseEnterEvent>(_ =>
+                {
+                    refreshButtonElement.style.borderTopColor = refreshAccentColor;
+                    refreshButtonElement.style.borderRightColor = refreshAccentColor;
+                    refreshButtonElement.style.borderBottomColor = refreshAccentColor;
+                    refreshButtonElement.style.borderLeftColor = refreshAccentColor;
+                });
+                refreshButtonElement.RegisterCallback<MouseLeaveEvent>(_ =>
+                {
+                    refreshButtonElement.style.borderTopColor = refreshBorder;
+                    refreshButtonElement.style.borderRightColor = refreshBorder;
+                    refreshButtonElement.style.borderBottomColor = refreshBorder;
+                    refreshButtonElement.style.borderLeftColor = refreshBorder;
+                });
                 targetRow.Add(refreshButtonElement);
 
                 var fengexian1 = new VisualElement { name = "fengexian1" };
@@ -419,6 +428,7 @@ namespace TLNexus.GitU
                 }
 
                 var settingButton = new Button { name = "Setting", text = "S" };
+                settingButton.style.backgroundColor = Rgba(255, 255, 255, 0.06f);
                 settingButton.style.height = 22;
                 settingButton.style.width = 22;
                 settingButton.style.marginLeft = 2;
@@ -427,6 +437,30 @@ namespace TLNexus.GitU
                 settingButton.style.borderTopRightRadius = 4;
                 settingButton.style.borderBottomRightRadius = 4;
                 settingButton.style.borderBottomLeftRadius = 4;
+                settingButton.style.borderTopWidth = 1;
+                settingButton.style.borderRightWidth = 1;
+                settingButton.style.borderBottomWidth = 1;
+                settingButton.style.borderLeftWidth = 1;
+                var settingBorder = Rgba(255, 255, 255, 0.12f);
+                var settingAccentColor = new Color(57f / 255f, 209f / 255f, 157f / 255f, 1f);
+                settingButton.style.borderTopColor = settingBorder;
+                settingButton.style.borderRightColor = settingBorder;
+                settingButton.style.borderBottomColor = settingBorder;
+                settingButton.style.borderLeftColor = settingBorder;
+                settingButton.RegisterCallback<MouseEnterEvent>(_ =>
+                {
+                    settingButton.style.borderTopColor = settingAccentColor;
+                    settingButton.style.borderRightColor = settingAccentColor;
+                    settingButton.style.borderBottomColor = settingAccentColor;
+                    settingButton.style.borderLeftColor = settingAccentColor;
+                });
+                settingButton.RegisterCallback<MouseLeaveEvent>(_ =>
+                {
+                    settingButton.style.borderTopColor = settingBorder;
+                    settingButton.style.borderRightColor = settingBorder;
+                    settingButton.style.borderBottomColor = settingBorder;
+                    settingButton.style.borderLeftColor = settingBorder;
+                });
                 statusBlock.Add(settingButton);
 
                 var filterBox = new VisualElement { name = "filterBox" };
@@ -460,10 +494,10 @@ namespace TLNexus.GitU
                 toolbarLeft.style.flexDirection = FlexDirection.Row;
                 toolbarLeft.style.alignItems = Align.Center;
                 toolbarLeft.style.flexShrink = 1;
-                toolbarLeft.style.width = 150;
+                toolbarLeft.style.width = 100;
                 toolbarLeft.style.flexGrow = 0;
                 toolbarLeft.style.marginLeft = 10;
-                toolbarLeft.style.marginRight = 5;
+                toolbarLeft.style.marginRight = 0;
                 filterBox.Add(toolbarLeft);
 
                 var assetTypeMenuElement = new ToolbarMenu { name = "assetTypeMenu" };
@@ -477,15 +511,34 @@ namespace TLNexus.GitU
                 assetTypeMenuElement.style.marginRight = 0;
                 assetTypeMenuElement.style.marginBottom = 0;
                 assetTypeMenuElement.style.height = 22;
-                assetTypeMenuElement.style.borderTopWidth = 0;
-                assetTypeMenuElement.style.borderRightWidth = 0;
-                assetTypeMenuElement.style.borderBottomWidth = 0;
-                assetTypeMenuElement.style.borderLeftWidth = 0;
+                assetTypeMenuElement.style.borderTopWidth = 1;
+                assetTypeMenuElement.style.borderRightWidth = 1;
+                assetTypeMenuElement.style.borderBottomWidth = 1;
+                assetTypeMenuElement.style.borderLeftWidth = 1;
+                assetTypeMenuElement.style.borderTopColor = Color.clear;
+                assetTypeMenuElement.style.borderRightColor = Color.clear;
+                assetTypeMenuElement.style.borderBottomColor = Color.clear;
+                assetTypeMenuElement.style.borderLeftColor = Color.clear;
                 assetTypeMenuElement.style.borderTopLeftRadius = 4;
                 assetTypeMenuElement.style.borderTopRightRadius = 4;
                 assetTypeMenuElement.style.borderBottomRightRadius = 4;
                 assetTypeMenuElement.style.borderBottomLeftRadius = 4;
-                assetTypeMenuElement.style.width = 140;
+                assetTypeMenuElement.style.width = 100;
+                var menuAccentColor = new Color(57f / 255f, 209f / 255f, 157f / 255f, 1f);
+                assetTypeMenuElement.RegisterCallback<MouseEnterEvent>(_ =>
+                {
+                    assetTypeMenuElement.style.borderTopColor = menuAccentColor;
+                    assetTypeMenuElement.style.borderRightColor = menuAccentColor;
+                    assetTypeMenuElement.style.borderBottomColor = menuAccentColor;
+                    assetTypeMenuElement.style.borderLeftColor = menuAccentColor;
+                });
+                assetTypeMenuElement.RegisterCallback<MouseLeaveEvent>(_ =>
+                {
+                    assetTypeMenuElement.style.borderTopColor = Color.clear;
+                    assetTypeMenuElement.style.borderRightColor = Color.clear;
+                    assetTypeMenuElement.style.borderBottomColor = Color.clear;
+                    assetTypeMenuElement.style.borderLeftColor = Color.clear;
+                });
                 toolbarLeft.Add(assetTypeMenuElement);
 
                 var searchFieldElement = new TextField { name = "searchField", tooltip = "Search files, paths, or changes..." };
@@ -493,7 +546,7 @@ namespace TLNexus.GitU
                 searchFieldElement.style.marginTop = 0;
                 searchFieldElement.style.marginRight = 10;
                 searchFieldElement.style.marginBottom = 0;
-                searchFieldElement.style.marginLeft = 5;
+                searchFieldElement.style.marginLeft = 10;
                 searchFieldElement.style.borderTopLeftRadius = 0;
                 searchFieldElement.style.borderTopRightRadius = 0;
                 searchFieldElement.style.borderBottomRightRadius = 0;
@@ -883,10 +936,9 @@ namespace TLNexus.GitU
                 repositoryStatusUpButtonElement.style.fontSize = 12;
                 repositoryStatusUpButtonElement.style.unityBackgroundImageTintColor = Color.clear;
 
-                var sortButtonBg = Rgb(58, 58, 58);
-                var sortButtonBorder = Rgb(50, 50, 50);
-                var sortButtonBorderHover = Rgb(139, 92, 246);
-                var sortButtonHoverBg = Color.Lerp(sortButtonBg, Color.white, 0.08f);
+                var sortButtonBg = Rgba(255, 255, 255, 0.06f);
+                var sortButtonBorder = Rgba(255, 255, 255, 0.12f);
+                var sortButtonAccentColor = new Color(57f / 255f, 209f / 255f, 157f / 255f, 1f);
 
                 repositoryStatusUpButtonElement.style.backgroundColor = sortButtonBg;
                 repositoryStatusUpButtonElement.style.borderTopLeftRadius = 4;
@@ -904,20 +956,13 @@ namespace TLNexus.GitU
 
                 repositoryStatusUpButtonElement.RegisterCallback<MouseEnterEvent>(_ =>
                 {
-                    if (!repositoryStatusUpButtonElement.enabledInHierarchy)
-                    {
-                        return;
-                    }
-
-                    repositoryStatusUpButtonElement.style.backgroundColor = sortButtonHoverBg;
-                    repositoryStatusUpButtonElement.style.borderTopColor = sortButtonBorderHover;
-                    repositoryStatusUpButtonElement.style.borderRightColor = sortButtonBorderHover;
-                    repositoryStatusUpButtonElement.style.borderBottomColor = sortButtonBorderHover;
-                    repositoryStatusUpButtonElement.style.borderLeftColor = sortButtonBorderHover;
+                    repositoryStatusUpButtonElement.style.borderTopColor = sortButtonAccentColor;
+                    repositoryStatusUpButtonElement.style.borderRightColor = sortButtonAccentColor;
+                    repositoryStatusUpButtonElement.style.borderBottomColor = sortButtonAccentColor;
+                    repositoryStatusUpButtonElement.style.borderLeftColor = sortButtonAccentColor;
                 });
                 repositoryStatusUpButtonElement.RegisterCallback<MouseLeaveEvent>(_ =>
                 {
-                    repositoryStatusUpButtonElement.style.backgroundColor = sortButtonBg;
                     repositoryStatusUpButtonElement.style.borderTopColor = sortButtonBorder;
                     repositoryStatusUpButtonElement.style.borderRightColor = sortButtonBorder;
                     repositoryStatusUpButtonElement.style.borderBottomColor = sortButtonBorder;
@@ -1014,6 +1059,7 @@ namespace TLNexus.GitU
                 historyButtonElement.style.borderBottomWidth = 1;
                 historyButtonElement.style.borderLeftWidth = 1;
                 var historyBorder = Rgba(255, 255, 255, 0.12f);
+                var historyAccentColor = new Color(57f / 255f, 209f / 255f, 157f / 255f, 1f);
                 historyButtonElement.style.borderTopColor = historyBorder;
                 historyButtonElement.style.borderRightColor = historyBorder;
                 historyButtonElement.style.borderBottomColor = historyBorder;
@@ -1030,6 +1076,20 @@ namespace TLNexus.GitU
                 historyButtonElement.style.paddingBottom = 0;
                 historyButtonElement.style.paddingLeft = 0;
                 historyButtonElement.style.marginLeft = 0;
+                historyButtonElement.RegisterCallback<MouseEnterEvent>(_ =>
+                {
+                    historyButtonElement.style.borderTopColor = historyAccentColor;
+                    historyButtonElement.style.borderRightColor = historyAccentColor;
+                    historyButtonElement.style.borderBottomColor = historyAccentColor;
+                    historyButtonElement.style.borderLeftColor = historyAccentColor;
+                });
+                historyButtonElement.RegisterCallback<MouseLeaveEvent>(_ =>
+                {
+                    historyButtonElement.style.borderTopColor = historyBorder;
+                    historyButtonElement.style.borderRightColor = historyBorder;
+                    historyButtonElement.style.borderBottomColor = historyBorder;
+                    historyButtonElement.style.borderLeftColor = historyBorder;
+                });
                 commitRow.Add(historyButtonElement);
 
                 var commitSpacer = new VisualElement();
