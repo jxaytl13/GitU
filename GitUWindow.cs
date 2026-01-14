@@ -2092,7 +2092,7 @@ namespace TLNexus.GitU
             button.style.borderBottomWidth = 1;
             button.style.borderLeftWidth = 1;
             var borderColor = enabled
-                ? new Color(accentColor.r, accentColor.g, accentColor.b, 0.75f)
+                ? accentColor
                 : new Color(1f, 1f, 1f, 0.12f);
             button.style.borderTopColor = borderColor;
             button.style.borderRightColor = borderColor;
