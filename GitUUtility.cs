@@ -100,8 +100,21 @@ namespace TLNexus.GitU
         public DateTime? WorkingTreeTime;
         public bool IsStaged;
         public bool IsUnstaged;
+        public string RepoRoot;
+        public bool IsHeader;
+        public string HeaderText;
 
-        public GitAssetInfo(string path, string originalPath, GitChangeType type, DateTime? lastTime, DateTime? workingTime, bool isStaged, bool isUnstaged)
+        public GitAssetInfo(
+            string path,
+            string originalPath,
+            GitChangeType type,
+            DateTime? lastTime,
+            DateTime? workingTime,
+            bool isStaged,
+            bool isUnstaged,
+            string repoRoot,
+            bool isHeader = false,
+            string headerText = null)
         {
             AssetPath = path;
             OriginalPath = originalPath;
@@ -110,6 +123,9 @@ namespace TLNexus.GitU
             WorkingTreeTime = workingTime;
             IsStaged = isStaged;
             IsUnstaged = isUnstaged;
+            RepoRoot = repoRoot;
+            IsHeader = isHeader;
+            HeaderText = headerText;
         }
 
         public string FileName => Path.GetFileName(AssetPath);
@@ -123,8 +139,9 @@ namespace TLNexus.GitU
         public readonly DateTime? WorkingTreeTime;
         public readonly bool IsStaged;
         public readonly bool IsUnstaged;
+        public readonly string RepoRoot;
 
-        public GitChangeEntry(string path, string originalPath, GitChangeType type, DateTime? workingTreeTime, bool isStaged, bool isUnstaged)
+        public GitChangeEntry(string path, string originalPath, GitChangeType type, DateTime? workingTreeTime, bool isStaged, bool isUnstaged, string repoRoot)
         {
             Path = path;
             OriginalPath = originalPath;
@@ -132,6 +149,7 @@ namespace TLNexus.GitU
             WorkingTreeTime = workingTreeTime;
             IsStaged = isStaged;
             IsUnstaged = isUnstaged;
+            RepoRoot = repoRoot;
         }
     }
 
@@ -154,6 +172,23 @@ namespace TLNexus.GitU
         private const int GitCommandTimeoutShortMs = 30_000;
         private const int GitCommandTimeoutMediumMs = 120_000;
         private const int GitCommandTimeoutLongMs = 300_000;
+        private const int GitRepositoryRootsCacheSeconds = 3;
+        private const int GitRepositoryRootScanMaxDepth = 12;
+
+        private static readonly string[] GitRootScanSkipFolderNames =
+        {
+            ".git",
+            ".vs",
+            ".idea",
+            "Library",
+            "Temp",
+            "Obj",
+            "Logs",
+            "Build",
+            "Builds",
+            "UserSettings",
+            "node_modules",
+        };
 
         internal static bool IsMatchAssetTypeFilter(string unityAssetPath, UnityAssetTypeFilter filter)
         {
@@ -291,10 +326,15 @@ namespace TLNexus.GitU
         }
 
         private static string cachedProjectRoot;
+        private static string cachedUnityGitRoot;
         private static string cachedUnityProjectFolder;
         private static string contextAssetAbsolutePath;
         private static bool gitRootNotFoundLogged;
         private static bool gitRevParseWarningLogged;
+
+        private static readonly object repositoryRootsLock = new object();
+        private static List<string> cachedRepositoryRoots;
+        private static DateTime cachedRepositoryRootsTimeUtc;
 
         internal static string ProjectRoot
         {
@@ -323,6 +363,19 @@ namespace TLNexus.GitU
 
         internal static string UnityProjectFolder => GetUnityProjectFolder();
 
+        internal static string UnityGitRoot
+        {
+            get
+            {
+                if (string.IsNullOrEmpty(cachedUnityGitRoot) || !Directory.Exists(cachedUnityGitRoot))
+                {
+                    cachedUnityGitRoot = LocateUnityGitRoot();
+                }
+
+                return cachedUnityGitRoot;
+            }
+        }
+
         internal readonly struct GitStageRequest
         {
             public readonly string GitRelativePath;
@@ -338,6 +391,66 @@ namespace TLNexus.GitU
         internal static bool TryGetGitRelativePath(string unityAssetPath, out string gitRelativePath)
         {
             gitRelativePath = ConvertUnityPathToGitPath(unityAssetPath);
+            return !string.IsNullOrEmpty(gitRelativePath);
+        }
+
+        internal static bool TryGetGitRelativePath(string unityAssetPath, out string gitRoot, out string gitRelativePath)
+        {
+            gitRoot = null;
+            gitRelativePath = null;
+
+            if (string.IsNullOrWhiteSpace(unityAssetPath))
+            {
+                return false;
+            }
+
+            var absolutePath = ResolveAbsolutePath(unityAssetPath);
+            if (string.IsNullOrEmpty(absolutePath))
+            {
+                return false;
+            }
+
+            var startDirectory = absolutePath;
+            try
+            {
+                if (File.Exists(absolutePath))
+                {
+                    startDirectory = Path.GetDirectoryName(absolutePath) ?? absolutePath;
+                }
+            }
+            catch
+            {
+                // ignored
+            }
+
+            gitRoot = FindGitRootByTraversal(startDirectory);
+            if (string.IsNullOrEmpty(gitRoot))
+            {
+                return false;
+            }
+
+            try
+            {
+                gitRoot = NormalizeDirectoryPath(gitRoot);
+            }
+            catch
+            {
+                // ignored
+            }
+
+            if (!absolutePath.StartsWith(gitRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            var relative = absolutePath.Substring(gitRoot.Length)
+                .TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (string.IsNullOrEmpty(relative))
+            {
+                return false;
+            }
+
+            gitRelativePath = NormalizeAssetPath(relative);
             return !string.IsNullOrEmpty(gitRelativePath);
         }
 
@@ -357,6 +470,11 @@ namespace TLNexus.GitU
             {
                 contextAssetAbsolutePath = null;
                 cachedProjectRoot = null;
+                lock (repositoryRootsLock)
+                {
+                    cachedRepositoryRoots = null;
+                    cachedRepositoryRootsTimeUtc = DateTime.MinValue;
+                }
                 return;
             }
 
@@ -379,23 +497,346 @@ namespace TLNexus.GitU
             }
 
             cachedProjectRoot = null;
+            lock (repositoryRootsLock)
+            {
+                cachedRepositoryRoots = null;
+                cachedRepositoryRootsTimeUtc = DateTime.MinValue;
+            }
         }
 
         internal static List<GitChangeEntry> GetWorkingTreeChanges()
         {
             var result = new List<GitChangeEntry>();
 
-            // Use --untracked-files=all so untracked directories are expanded into files;
-            // otherwise Git may collapse them as "?? someDir/" which Unity can't stage/commit precisely.
-            if (!TryRunGitCommandRaw("status --porcelain=v1 -z --untracked-files=all --find-renames", out var output, out _))
+            var repoRoots = GetRepositoryRootsForUnityProject();
+            if (repoRoots.Count == 0)
             {
                 return result;
             }
 
-            if (string.IsNullOrEmpty(output))
+            var nestedRootsByRoot = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var root in repoRoots)
             {
-                return result;
+                var nested = repoRoots
+                    .Where(other => IsPathStrictlyUnder(other, root))
+                    .ToList();
+                nestedRootsByRoot[root] = nested;
             }
+
+            foreach (var repoRoot in repoRoots)
+            {
+                // Use --untracked-files=all so untracked directories are expanded into files;
+                // otherwise Git may collapse them as "?? someDir/" which Unity can't stage/commit precisely.
+                if (!TryRunGitProcessRaw(repoRoot, "status --porcelain=v1 -z --untracked-files=all --find-renames", GitCommandTimeoutShortMs, out var output, out var error))
+                {
+                    if (!string.IsNullOrWhiteSpace(error))
+                    {
+                        Debug.LogWarning($"GitU: git status 失败: {repoRoot}\n{error.Trim()}");
+                    }
+                    continue;
+                }
+
+                if (string.IsNullOrEmpty(output))
+                {
+                    continue;
+                }
+
+                ParseGitStatusPorcelainV1ZInto(output, repoRoot, nestedRootsByRoot[repoRoot], result);
+            }
+
+            return result;
+        }
+
+        internal static IReadOnlyList<string> GetRepositoryRootsForUnityProject()
+        {
+            var unityFolder = GetUnityProjectFolder();
+            var primaryRoot = UnityGitRoot;
+            var contextRoot = FindGitRootByTraversal(contextAssetAbsolutePath);
+
+            if (string.IsNullOrEmpty(primaryRoot) && (string.IsNullOrEmpty(unityFolder) || !Directory.Exists(unityFolder)))
+            {
+                return Array.Empty<string>();
+            }
+
+            lock (repositoryRootsLock)
+            {
+                if (cachedRepositoryRoots != null &&
+                    (DateTime.UtcNow - cachedRepositoryRootsTimeUtc).TotalSeconds < GitRepositoryRootsCacheSeconds)
+                {
+                    return cachedRepositoryRoots;
+                }
+            }
+
+            var roots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (!string.IsNullOrEmpty(primaryRoot) && Directory.Exists(primaryRoot))
+            {
+                roots.Add(NormalizeDirectoryPath(primaryRoot));
+            }
+
+            if (!string.IsNullOrEmpty(contextRoot) && Directory.Exists(contextRoot))
+            {
+                roots.Add(NormalizeDirectoryPath(contextRoot));
+            }
+
+            if (!string.IsNullOrEmpty(unityFolder) && Directory.Exists(unityFolder))
+            {
+                foreach (var nested in EnumerateGitRootsUnderFolder(unityFolder, GitRepositoryRootScanMaxDepth))
+                {
+                    if (string.IsNullOrEmpty(nested))
+                    {
+                        continue;
+                    }
+
+                    roots.Add(NormalizeDirectoryPath(nested));
+                }
+            }
+
+            var finalRoots = roots
+                .Where(r => !string.IsNullOrEmpty(r) && Directory.Exists(r))
+                .OrderBy(r => r.Length)
+                .ThenBy(r => r, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            lock (repositoryRootsLock)
+            {
+                cachedRepositoryRoots = finalRoots;
+                cachedRepositoryRootsTimeUtc = DateTime.UtcNow;
+            }
+
+            return finalRoots;
+        }
+
+        internal static string GetRepositoryDisplayName(string repoRoot)
+        {
+            if (string.IsNullOrWhiteSpace(repoRoot))
+            {
+                return string.Empty;
+            }
+
+            var normalized = NormalizeDirectoryPath(repoRoot);
+            var primary = UnityGitRoot;
+            if (!string.IsNullOrEmpty(primary))
+            {
+                primary = NormalizeDirectoryPath(primary);
+                if (string.Equals(normalized, primary, StringComparison.OrdinalIgnoreCase))
+                {
+                    return Path.GetFileName(primary);
+                }
+
+                if (IsPathStrictlyUnder(normalized, primary))
+                {
+                    var relative = normalized.Substring(primary.Length)
+                        .TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                        .Replace('\\', '/');
+                    if (!string.IsNullOrEmpty(relative))
+                    {
+                        return relative;
+                    }
+                }
+            }
+
+            return Path.GetFileName(normalized);
+        }
+
+        private static string LocateUnityGitRoot()
+        {
+            var traversalRoot = FindGitRootByTraversal(GetUnityProjectFolder());
+            if (!string.IsNullOrEmpty(traversalRoot))
+            {
+                return traversalRoot;
+            }
+
+            if (TryResolveGitRootViaGitCommand(GetUnityProjectFolder(), out var resolvedRoot))
+            {
+                return resolvedRoot;
+            }
+
+            return null;
+        }
+
+        private static IEnumerable<string> EnumerateGitRootsUnderFolder(string startFolder, int maxDepth)
+        {
+            if (string.IsNullOrEmpty(startFolder) || !Directory.Exists(startFolder))
+            {
+                yield break;
+            }
+
+            var skip = new HashSet<string>(GitRootScanSkipFolderNames, StringComparer.OrdinalIgnoreCase);
+            var stack = new Stack<(string path, int depth)>();
+            stack.Push((Path.GetFullPath(startFolder), 0));
+
+            while (stack.Count > 0)
+            {
+                var (current, depth) = stack.Pop();
+                if (depth > maxDepth)
+                {
+                    continue;
+                }
+
+                if (HasGitMarker(current))
+                {
+                    yield return current;
+                }
+
+                if (depth == maxDepth)
+                {
+                    continue;
+                }
+
+                IEnumerable<string> children;
+                try
+                {
+                    children = Directory.EnumerateDirectories(current);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                foreach (var child in children)
+                {
+                    var name = Path.GetFileName(child);
+                    if (string.IsNullOrEmpty(name) || skip.Contains(name))
+                    {
+                        continue;
+                    }
+
+                    var isReparsePoint = false;
+                    try
+                    {
+                        var attrs = File.GetAttributes(child);
+                        if ((attrs & FileAttributes.ReparsePoint) != 0)
+                        {
+                            isReparsePoint = true;
+                        }
+                    }
+                    catch
+                    {
+                        // ignored
+                    }
+
+                    // Avoid recursively scanning symlink/junction targets, but still detect if the link root itself is a git repository.
+                    if (isReparsePoint)
+                    {
+                        if (HasGitMarker(child))
+                        {
+                            yield return child;
+                        }
+
+                        continue;
+                    }
+
+                    stack.Push((child, depth + 1));
+                }
+            }
+        }
+
+        private static bool HasGitMarker(string directory)
+        {
+            try
+            {
+                var marker = Path.Combine(directory, ".git");
+                return Directory.Exists(marker) || File.Exists(marker);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static string NormalizeDirectoryPath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return string.Empty;
+            }
+
+            return Path.GetFullPath(path)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+
+        private static bool IsPathStrictlyUnder(string candidate, string parent)
+        {
+            if (string.IsNullOrEmpty(candidate) || string.IsNullOrEmpty(parent))
+            {
+                return false;
+            }
+
+            candidate = NormalizeDirectoryPath(candidate);
+            parent = NormalizeDirectoryPath(parent);
+
+            if (!candidate.StartsWith(parent, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (candidate.Length == parent.Length)
+            {
+                return false;
+            }
+
+            var nextChar = candidate[parent.Length];
+            return nextChar == Path.DirectorySeparatorChar || nextChar == Path.AltDirectorySeparatorChar;
+        }
+
+        private static bool IsUnderAnyNestedRoot(string absolutePath, IReadOnlyList<string> nestedRoots)
+        {
+            if (string.IsNullOrEmpty(absolutePath) || nestedRoots == null || nestedRoots.Count == 0)
+            {
+                return false;
+            }
+
+            for (var i = 0; i < nestedRoots.Count; i++)
+            {
+                var nested = nestedRoots[i];
+                if (string.IsNullOrEmpty(nested))
+                {
+                    continue;
+                }
+
+                if (string.Equals(absolutePath, nested, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                if (!absolutePath.StartsWith(nested, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (absolutePath.Length == nested.Length)
+                {
+                    return true;
+                }
+
+                var nextChar = absolutePath[nested.Length];
+                if (nextChar == Path.DirectorySeparatorChar || nextChar == Path.AltDirectorySeparatorChar)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static void ParseGitStatusPorcelainV1ZInto(
+            string output,
+            string repoRoot,
+            IReadOnlyList<string> nestedRepoRoots,
+            List<GitChangeEntry> result)
+        {
+            if (result == null || string.IsNullOrEmpty(output) || string.IsNullOrEmpty(repoRoot))
+            {
+                return;
+            }
+
+            repoRoot = NormalizeDirectoryPath(repoRoot);
+
+            var normalizedNestedRoots = (nestedRepoRoots ?? Array.Empty<string>())
+                .Where(r => !string.IsNullOrEmpty(r))
+                .Select(NormalizeDirectoryPath)
+                .OrderByDescending(r => r.Length)
+                .ToList();
 
             var records = output.Split('\0');
             for (var i = 0; i < records.Length; i++)
@@ -421,8 +862,6 @@ namespace TLNexus.GitU
 
                 string originalPathSegment = null;
 
-                // In porcelain v1 -z, rename/copy paths are emitted as two NUL-separated fields:
-                // "XY old\0new\0". Keep both paths so filtering/staging can account for moves in/out.
                 var statusPrimary = statusCode[0] != ' ' ? statusCode[0] : statusCode[1];
                 if ((statusPrimary == 'R' || statusPrimary == 'C') && i + 1 < records.Length)
                 {
@@ -451,15 +890,30 @@ namespace TLNexus.GitU
                     continue;
                 }
 
-                var unityRelativePath = ConvertGitPathToUnityPath(pathSegment);
-                var unityOriginalPath = string.IsNullOrEmpty(originalPathSegment) ? null : ConvertGitPathToUnityPath(originalPathSegment);
+                string absolutePath;
+                try
+                {
+                    absolutePath = Path.GetFullPath(Path.Combine(repoRoot, pathSegment));
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (IsUnderAnyNestedRoot(absolutePath, normalizedNestedRoots))
+                {
+                    continue;
+                }
+
+                var unityRelativePath = ConvertGitPathToUnityPath(pathSegment, repoRoot);
+                var unityOriginalPath = string.IsNullOrEmpty(originalPathSegment) ? null : ConvertGitPathToUnityPath(originalPathSegment, repoRoot);
 
                 if (string.IsNullOrEmpty(unityRelativePath))
                 {
                     if (!string.IsNullOrEmpty(unityOriginalPath) && changeType == GitChangeType.Renamed)
                     {
                         var workingTimeFallback = GetWorkingTreeTimestamp(unityOriginalPath, GitChangeType.Deleted);
-                        result.Add(new GitChangeEntry(unityOriginalPath, null, GitChangeType.Deleted, workingTimeFallback, isStaged, isUnstaged));
+                        result.Add(new GitChangeEntry(unityOriginalPath, null, GitChangeType.Deleted, workingTimeFallback, isStaged, isUnstaged, repoRoot));
                     }
 
                     continue;
@@ -471,19 +925,16 @@ namespace TLNexus.GitU
                 }
 
                 var workingTime = GetWorkingTreeTimestamp(unityRelativePath, changeType);
-                result.Add(new GitChangeEntry(unityRelativePath, unityOriginalPath, changeType, workingTime, isStaged, isUnstaged));
+                result.Add(new GitChangeEntry(unityRelativePath, unityOriginalPath, changeType, workingTime, isStaged, isUnstaged, repoRoot));
 
-                // For rename/move entries, also emit an explicit "Deleted" entry for the original path so UI can show it.
                 if (changeType == GitChangeType.Renamed &&
                     !string.IsNullOrEmpty(unityOriginalPath) &&
                     !string.Equals(unityOriginalPath, unityRelativePath, StringComparison.OrdinalIgnoreCase))
                 {
                     var deletedTime = GetWorkingTreeTimestamp(unityOriginalPath, GitChangeType.Deleted);
-                    result.Add(new GitChangeEntry(unityOriginalPath, unityRelativePath, GitChangeType.Deleted, deletedTime, isStaged, isUnstaged));
+                    result.Add(new GitChangeEntry(unityOriginalPath, unityRelativePath, GitChangeType.Deleted, deletedTime, isStaged, isUnstaged, repoRoot));
                 }
             }
-
-            return result;
         }
 
         internal static IEnumerable<GitChangeEntry> GetAssetRelatedChanges(string assetPath)
@@ -763,7 +1214,7 @@ namespace TLNexus.GitU
                 return true;
             }
 
-            var gitPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var gitPathsByRoot = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
             foreach (var unityPath in unityPaths)
             {
                 var trimmed = unityPath?.Trim();
@@ -772,22 +1223,39 @@ namespace TLNexus.GitU
                     continue;
                 }
 
-                // 将 Unity 路径转换为 git 相对路径
-                var gitPath = ConvertUnityPathToGitPath(trimmed);
+                if (!TryGetGitRelativePath(trimmed, out var root, out var gitPath))
+                {
+                    continue;
+                }
+
+                if (!gitPathsByRoot.TryGetValue(root, out var set))
+                {
+                    set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    gitPathsByRoot[root] = set;
+                }
+
                 if (!string.IsNullOrEmpty(gitPath))
                 {
-                    gitPaths.Add(gitPath);
+                    set.Add(gitPath);
                 }
             }
 
-            if (gitPaths.Count == 0)
+            if (gitPathsByRoot.Count == 0)
             {
                 return true;
             }
 
             var succeeded = 0;
             var firstError = string.Empty;
-            TryRunGitPathCommandsBatched(gitRoot, "add", gitPaths, ref succeeded, ref firstError);
+            foreach (var kvp in gitPathsByRoot)
+            {
+                if (kvp.Value == null || kvp.Value.Count == 0)
+                {
+                    continue;
+                }
+
+                TryRunGitPathCommandsBatched(kvp.Key, "add", kvp.Value, ref succeeded, ref firstError);
+            }
 
             return succeeded > 0;
         }
@@ -1011,6 +1479,17 @@ namespace TLNexus.GitU
 
             summary = isChinese ? "提交成功。" : "Commit successful.";
             return true;
+        }
+
+        internal static bool HasStagedChanges(string gitRoot)
+        {
+            if (string.IsNullOrEmpty(gitRoot))
+            {
+                return false;
+            }
+
+            return TryRunGitCommandNoLog(gitRoot, "diff --cached --name-only", GitCommandTimeoutShortMs, out var stdout, out _)
+                   && !string.IsNullOrWhiteSpace(stdout);
         }
 
         internal static bool PushGit(string gitRoot, bool isChinese, out string summary)
@@ -1457,6 +1936,11 @@ namespace TLNexus.GitU
 
         private static string ConvertGitPathToUnityPath(string gitRelativePath)
         {
+            return ConvertGitPathToUnityPath(gitRelativePath, ProjectRoot);
+        }
+
+        private static string ConvertGitPathToUnityPath(string gitRelativePath, string gitRoot)
+        {
             if (string.IsNullOrEmpty(gitRelativePath))
             {
                 return null;
@@ -1472,7 +1956,6 @@ namespace TLNexus.GitU
                 return null;
             }
 
-            var gitRoot = ProjectRoot;
             var unityFolder = GetUnityProjectFolder();
             if (string.IsNullOrEmpty(gitRoot) || string.IsNullOrEmpty(unityFolder))
             {
@@ -1506,12 +1989,16 @@ namespace TLNexus.GitU
 
         private static string ConvertUnityPathToGitPath(string unityRelativePath)
         {
+            return ConvertUnityPathToGitPath(unityRelativePath, ProjectRoot);
+        }
+
+        private static string ConvertUnityPathToGitPath(string unityRelativePath, string gitRoot)
+        {
             if (string.IsNullOrEmpty(unityRelativePath))
             {
                 return null;
             }
 
-            var gitRoot = ProjectRoot;
             if (string.IsNullOrEmpty(gitRoot))
             {
                 return null;
@@ -1589,8 +2076,7 @@ namespace TLNexus.GitU
                 return false;
             }
 
-            var gitPath = ConvertUnityPathToGitPath(unityPath);
-            if (string.IsNullOrEmpty(gitPath))
+            if (!TryGetGitRelativePath(unityPath, out var gitRoot, out var gitPath))
             {
                 return false;
             }
@@ -1601,7 +2087,7 @@ namespace TLNexus.GitU
 
             Debug.Log($"[GitQuickCommit] Stage: type={changeType}, unityPath={unityPath}, gitPath={gitPath}, args=git {arguments}");
 
-            if (TryRunGitCommand(arguments, out _))
+            if (TryRunGitCommandNoLog(gitRoot, arguments, GitCommandTimeoutShortMs, out _, out _))
             {
                 return true;
             }
@@ -1661,8 +2147,7 @@ namespace TLNexus.GitU
                 return false;
             }
 
-            var gitPath = ConvertUnityPathToGitPath(unityPath);
-            if (string.IsNullOrEmpty(gitPath))
+            if (!TryGetGitRelativePath(unityPath, out var gitRoot, out var gitPath))
             {
                 return false;
             }
@@ -1672,7 +2157,7 @@ namespace TLNexus.GitU
             var resetOk = true;
             if (info.IsStaged)
             {
-                resetOk = TryRunGitCommand(BuildGitArgs("reset -q HEAD", gitPath), out _);
+                resetOk = TryRunGitCommandNoLog(gitRoot, BuildGitArgs("reset -q HEAD", gitPath), GitCommandTimeoutShortMs, out _, out _);
             }
 
             var treatAsAdded = info.ChangeType == GitChangeType.Added ||
@@ -1682,11 +2167,11 @@ namespace TLNexus.GitU
             if (treatAsAdded)
             {
                 var cleanFlags = isFolder ? "-fd" : "-f";
-                var cleanOk = TryRunGitCommand(BuildGitArgs($"clean {cleanFlags}", gitPath), out _);
+                var cleanOk = TryRunGitCommandNoLog(gitRoot, BuildGitArgs($"clean {cleanFlags}", gitPath), GitCommandTimeoutShortMs, out _, out _);
                 return resetOk && cleanOk;
             }
 
-            var checkoutOk = TryRunGitCommand(BuildGitArgs("checkout", gitPath), out _);
+            var checkoutOk = TryRunGitCommandNoLog(gitRoot, BuildGitArgs("checkout", gitPath), GitCommandTimeoutShortMs, out _, out _);
             return resetOk && checkoutOk;
         }
 
@@ -1707,8 +2192,7 @@ namespace TLNexus.GitU
             foreach (var info in list)
             {
                 total++;
-                var gitPath = ConvertUnityPathToGitPath(info.AssetPath);
-                if (string.IsNullOrEmpty(gitPath))
+                if (!TryGetGitRelativePath(info.AssetPath, out var gitRoot, out var gitPath))
                 {
                     continue;
                 }
@@ -1716,18 +2200,17 @@ namespace TLNexus.GitU
                 var arguments = BuildGitArgs("reset HEAD", gitPath);
                 Debug.Log($"[GitQuickCommit] Unstage: unityPath={info.AssetPath}, gitPath={gitPath}, args=git {arguments}");
 
-                var unstagedOk = TryRunGitCommand(arguments, out _);
+                var unstagedOk = TryRunGitCommandNoLog(gitRoot, arguments, GitCommandTimeoutShortMs, out _, out _);
                 if (unstagedOk &&
                     info.ChangeType == GitChangeType.Renamed &&
                     !string.IsNullOrEmpty(info.OriginalPath) &&
                     !string.Equals(info.OriginalPath, info.AssetPath, StringComparison.OrdinalIgnoreCase))
                 {
-                    var originalGitPath = ConvertUnityPathToGitPath(info.OriginalPath);
-                    if (!string.IsNullOrEmpty(originalGitPath))
+                    if (TryGetGitRelativePath(info.OriginalPath, out var originalGitRoot, out var originalGitPath))
                     {
                         var originalArgs = BuildGitArgs("reset HEAD", originalGitPath);
                         Debug.Log($"[GitQuickCommit] Unstage: unityPath={info.OriginalPath}, gitPath={originalGitPath}, args=git {originalArgs}");
-                        unstagedOk = TryRunGitCommand(originalArgs, out _);
+                        unstagedOk = TryRunGitCommandNoLog(originalGitRoot, originalArgs, GitCommandTimeoutShortMs, out _, out _);
                     }
                 }
 

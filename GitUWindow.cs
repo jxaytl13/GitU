@@ -13,6 +13,11 @@ namespace TLNexus.GitU
 {
     internal partial class GitUWindow : EditorWindow
     {
+        private static readonly Dictionary<Type, Texture2D> TypeIconCache = new Dictionary<Type, Texture2D>();
+        private static Texture2D cachedFolderIcon;
+        private static Texture2D cachedDefaultAssetIcon;
+        private static Texture2D cachedUIImageIcon;
+
         private const string WindowTitle = "GitU";
         private const string MenuPath = "Window/T·L Nexus/GitU";
         private const string CommitHistoryFileName = "GitUCommitHistory.json";
@@ -54,6 +59,8 @@ namespace TLNexus.GitU
         private string targetAssetPath;
         private readonly List<GitAssetInfo> assetInfos = new List<GitAssetInfo>();
         private List<GitChangeEntry> gitChanges = new List<GitChangeEntry>();
+        private List<string> activeRepositoryRoots = new List<string>();
+        private bool hasMultipleRepositories;
         private readonly HashSet<string> relevantPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly List<string> targetAssetPaths = new List<string>();
         private readonly List<string> targetFolderPrefixes = new List<string>();
@@ -235,6 +242,7 @@ namespace TLNexus.GitU
         private sealed class AssetRowRefs
         {
             public bool StagedView;
+            public VisualElement IconContainer;
             public Image IconImage;
             public Label NameLabel;
             public Label PathLabel;
@@ -618,11 +626,16 @@ namespace TLNexus.GitU
 
                 if (refreshInProgress || gitOperationInProgress)
                 {
+                    if (autoSaveBeforeOpen)
+                    {
+                        Debug.Log("[GitU] Auto-save on open skipped (busy: refreshing or running git operation).");
+                    }
                     return;
                 }
 
                 if (autoSaveBeforeOpen)
                 {
+                    Debug.Log("[GitU] Auto-save on open: executing (SaveAssets + SaveOpenScenes).");
                     TryAutoSaveBeforeOpen();
                 }
 
@@ -708,8 +721,11 @@ namespace TLNexus.GitU
         {
             if (EditorApplication.isPlayingOrWillChangePlaymode)
             {
+                Debug.Log("[GitU] Auto-save on open skipped (play mode).");
                 return;
             }
+
+            Debug.Log("[GitU] Auto-save on open started.");
 
             var assetsOk = true;
             try
@@ -1678,8 +1694,8 @@ namespace TLNexus.GitU
                 saveToDiskHintLabel.text = isChineseUi ? SaveToDiskHintZh : SaveToDiskHintEn;
             }
 
-            if (unstagedHeaderLabel != null) unstagedHeaderLabel.text = GetUnstagedHeaderText(visibleUnstagedItems.Count);
-            if (stagedHeaderLabel != null) stagedHeaderLabel.text = GetStagedHeaderText(visibleStagedItems.Count);
+            if (unstagedHeaderLabel != null) unstagedHeaderLabel.text = GetUnstagedHeaderText(GetVisibleAssetCount(visibleUnstagedItems));
+            if (stagedHeaderLabel != null) stagedHeaderLabel.text = GetStagedHeaderText(GetVisibleAssetCount(visibleStagedItems));
 
             if (unstagedEmptyHintLabel != null)
             {
@@ -1708,6 +1724,27 @@ namespace TLNexus.GitU
         private string GetStagedHeaderText(int count)
         {
             return isChineseUi ? $"待提交（已暂存）：{count} 项" : $"Staged changes: {count} items";
+        }
+
+        private static int GetVisibleAssetCount(List<GitAssetInfo> items)
+        {
+            if (items == null || items.Count == 0)
+            {
+                return 0;
+            }
+
+            var count = 0;
+            foreach (var item in items)
+            {
+                if (item == null || item.IsHeader || string.IsNullOrEmpty(item.AssetPath))
+                {
+                    continue;
+                }
+
+                count++;
+            }
+
+            return count;
         }
 
         private void ToggleSortMenu()
@@ -2140,20 +2177,20 @@ namespace TLNexus.GitU
                 return;
             }
 
-            var gitRoot = GitUtility.ProjectRoot;
             _ = GitUtility.UnityProjectFolder;
-            if (string.IsNullOrEmpty(gitRoot))
-            {
-                ShowTempNotification("未找到 Git 根目录。");
-                return;
-            }
 
-            var requests = new List<GitUtility.GitStageRequest>(toStage.Count);
+            var requestsByRoot = new Dictionary<string, List<GitUtility.GitStageRequest>>(StringComparer.OrdinalIgnoreCase);
             foreach (var info in toStage)
             {
-                if (GitUtility.TryGetGitRelativePath(info.AssetPath, out var gitPath))
+                if (GitUtility.TryGetGitRelativePath(info.AssetPath, out var root, out var gitPath))
                 {
-                    requests.Add(new GitUtility.GitStageRequest(gitPath, info.ChangeType));
+                    if (!requestsByRoot.TryGetValue(root, out var list))
+                    {
+                        list = new List<GitUtility.GitStageRequest>();
+                        requestsByRoot[root] = list;
+                    }
+
+                    list.Add(new GitUtility.GitStageRequest(gitPath, info.ChangeType));
                 }
 
                 // If this is an explicit "Deleted (from move)" entry, stage the destination path as well
@@ -2161,21 +2198,37 @@ namespace TLNexus.GitU
                 if (info.ChangeType == GitChangeType.Deleted &&
                     !string.IsNullOrEmpty(info.OriginalPath) &&
                     !string.Equals(info.OriginalPath, info.AssetPath, StringComparison.OrdinalIgnoreCase) &&
-                    GitUtility.TryGetGitRelativePath(info.OriginalPath, out var movedToGitPath))
+                    GitUtility.TryGetGitRelativePath(info.OriginalPath, out var movedToRoot, out var movedToGitPath))
                 {
-                    requests.Add(new GitUtility.GitStageRequest(movedToGitPath, GitChangeType.Added));
+                    if (!requestsByRoot.TryGetValue(movedToRoot, out var list))
+                    {
+                        list = new List<GitUtility.GitStageRequest>();
+                        requestsByRoot[movedToRoot] = list;
+                    }
+
+                    list.Add(new GitUtility.GitStageRequest(movedToGitPath, GitChangeType.Added));
                 }
 
                 if (info.ChangeType == GitChangeType.Renamed &&
                     !string.IsNullOrEmpty(info.OriginalPath) &&
                     !string.Equals(info.OriginalPath, info.AssetPath, StringComparison.OrdinalIgnoreCase) &&
-                    GitUtility.TryGetGitRelativePath(info.OriginalPath, out var originalGitPath))
+                    GitUtility.TryGetGitRelativePath(info.OriginalPath, out var originalRoot, out var originalGitPath))
                 {
-                    requests.Add(new GitUtility.GitStageRequest(originalGitPath, GitChangeType.Deleted));
+                    if (!requestsByRoot.TryGetValue(originalRoot, out var list))
+                    {
+                        list = new List<GitUtility.GitStageRequest>();
+                        requestsByRoot[originalRoot] = list;
+                    }
+
+                    list.Add(new GitUtility.GitStageRequest(originalGitPath, GitChangeType.Deleted));
                 }
             }
 
-            if (requests.Count == 0)
+            var requestGroups = requestsByRoot
+                .Where(kvp => kvp.Value != null && kvp.Value.Count > 0)
+                .ToList();
+
+            if (requestGroups.Count == 0)
             {
                 ShowTempNotification("当前没有可发送的变更。");
                 return;
@@ -2190,11 +2243,13 @@ namespace TLNexus.GitU
             selectedUnstagedPaths.Clear();
             ApplyIncrementalMoveBetweenLists(toStage, toStaged: true);
 
-            pendingStageGitPaths = requests.Select(r => r.GitRelativePath)
-                .Where(p => !string.IsNullOrWhiteSpace(p))
-                .Select(p => p.Trim())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            pendingStageGitPaths = !hasMultipleRepositories && requestGroups.Count == 1
+                ? requestGroups[0].Value.Select(r => r.GitRelativePath)
+                    .Where(p => !string.IsNullOrWhiteSpace(p))
+                    .Select(p => p.Trim())
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList()
+                : null;
 
             gitOperationInProgress = true;
             gitOperationKind = GitOperationKind.Stage;
@@ -2207,8 +2262,23 @@ namespace TLNexus.GitU
 
             gitOperationTask = Task.Run(() =>
             {
-                var success = GitUtility.StageGitPaths(gitRoot, requests, out var summary);
-                return new GitOperationResult(success, summary);
+                var summaries = new List<string>();
+                var anySucceeded = false;
+                var anyFailed = false;
+
+                foreach (var group in requestGroups)
+                {
+                    var success = GitUtility.StageGitPaths(group.Key, group.Value, out var summary);
+                    anySucceeded |= success;
+                    anyFailed |= !success;
+
+                    if (!string.IsNullOrWhiteSpace(summary))
+                    {
+                        summaries.Add(requestGroups.Count == 1 ? summary : $"{GitUtility.GetRepositoryDisplayName(group.Key)}: {summary}");
+                    }
+                }
+
+                return new GitOperationResult(anySucceeded && !anyFailed ? true : anySucceeded, string.Join("\n", summaries));
             });
             gitOperationTask.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
         }
@@ -2252,20 +2322,20 @@ namespace TLNexus.GitU
                 return;
             }
 
-            var gitRoot = GitUtility.ProjectRoot;
             _ = GitUtility.UnityProjectFolder;
-            if (string.IsNullOrEmpty(gitRoot))
-            {
-                ShowTempNotification("未找到 Git 根目录。");
-                return;
-            }
 
-            var requests = new List<string>(toUnstage.Count);
+            var requestsByRoot = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
             foreach (var info in toUnstage)
             {
-                if (GitUtility.TryGetGitRelativePath(info.AssetPath, out var gitPath))
+                if (GitUtility.TryGetGitRelativePath(info.AssetPath, out var root, out var gitPath))
                 {
-                    requests.Add(gitPath);
+                    if (!requestsByRoot.TryGetValue(root, out var list))
+                    {
+                        list = new List<string>();
+                        requestsByRoot[root] = list;
+                    }
+
+                    list.Add(gitPath);
                 }
 
                 // If this is an explicit "Deleted (from move)" entry, unstage the destination path as well
@@ -2273,21 +2343,43 @@ namespace TLNexus.GitU
                 if (info.ChangeType == GitChangeType.Deleted &&
                     !string.IsNullOrEmpty(info.OriginalPath) &&
                     !string.Equals(info.OriginalPath, info.AssetPath, StringComparison.OrdinalIgnoreCase) &&
-                    GitUtility.TryGetGitRelativePath(info.OriginalPath, out var movedToGitPath))
+                    GitUtility.TryGetGitRelativePath(info.OriginalPath, out var movedToRoot, out var movedToGitPath))
                 {
-                    requests.Add(movedToGitPath);
+                    if (!requestsByRoot.TryGetValue(movedToRoot, out var list))
+                    {
+                        list = new List<string>();
+                        requestsByRoot[movedToRoot] = list;
+                    }
+
+                    list.Add(movedToGitPath);
                 }
 
                 if (info.ChangeType == GitChangeType.Renamed &&
                     !string.IsNullOrEmpty(info.OriginalPath) &&
                     !string.Equals(info.OriginalPath, info.AssetPath, StringComparison.OrdinalIgnoreCase) &&
-                    GitUtility.TryGetGitRelativePath(info.OriginalPath, out var originalGitPath))
+                    GitUtility.TryGetGitRelativePath(info.OriginalPath, out var originalRoot, out var originalGitPath))
                 {
-                    requests.Add(originalGitPath);
+                    if (!requestsByRoot.TryGetValue(originalRoot, out var list))
+                    {
+                        list = new List<string>();
+                        requestsByRoot[originalRoot] = list;
+                    }
+
+                    list.Add(originalGitPath);
                 }
             }
 
-            if (requests.Count == 0)
+            var requestGroups = requestsByRoot
+                .Where(kvp => kvp.Value != null && kvp.Value.Count > 0)
+                .Select(kvp => new KeyValuePair<string, List<string>>(kvp.Key, kvp.Value
+                    .Where(p => !string.IsNullOrWhiteSpace(p))
+                    .Select(p => p.Trim())
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList()))
+                .Where(kvp => kvp.Value.Count > 0)
+                .ToList();
+
+            if (requestGroups.Count == 0)
             {
                 ShowTempNotification("当前没有可移出的待提交项。");
                 return;
@@ -2302,11 +2394,7 @@ namespace TLNexus.GitU
             selectedStagedPaths.Clear();
             ApplyIncrementalMoveBetweenLists(toUnstage, toStaged: false);
 
-            pendingUnstageGitPaths = requests
-                .Where(p => !string.IsNullOrWhiteSpace(p))
-                .Select(p => p.Trim())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            pendingUnstageGitPaths = !hasMultipleRepositories && requestGroups.Count == 1 ? requestGroups[0].Value : null;
 
             gitOperationInProgress = true;
             gitOperationKind = GitOperationKind.Unstage;
@@ -2319,8 +2407,23 @@ namespace TLNexus.GitU
 
             gitOperationTask = Task.Run(() =>
             {
-                var success = GitUtility.UnstageGitPaths(gitRoot, requests, out var summary);
-                return new GitOperationResult(success, summary);
+                var summaries = new List<string>();
+                var anySucceeded = false;
+                var anyFailed = false;
+
+                foreach (var group in requestGroups)
+                {
+                    var success = GitUtility.UnstageGitPaths(group.Key, group.Value, out var summary);
+                    anySucceeded |= success;
+                    anyFailed |= !success;
+
+                    if (!string.IsNullOrWhiteSpace(summary))
+                    {
+                        summaries.Add(requestGroups.Count == 1 ? summary : $"{GitUtility.GetRepositoryDisplayName(group.Key)}: {summary}");
+                    }
+                }
+
+                return new GitOperationResult(anySucceeded && !anyFailed ? true : anySucceeded, string.Join("\n", summaries));
             });
             gitOperationTask.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
         }
@@ -2328,6 +2431,12 @@ namespace TLNexus.GitU
         private void ApplyIncrementalMoveBetweenLists(List<GitAssetInfo> moved, bool toStaged)
         {
             if (!assetListViewsConfigured || !visibleListsInitialized || unstagedScrollView == null || stagedScrollView == null)
+            {
+                RefreshListViews();
+                return;
+            }
+
+            if (hasMultipleRepositories)
             {
                 RefreshListViews();
                 return;
@@ -2369,12 +2478,12 @@ namespace TLNexus.GitU
 
             if (unstagedHeaderLabel != null)
             {
-                unstagedHeaderLabel.text = GetUnstagedHeaderText(visibleUnstagedItems.Count);
+                unstagedHeaderLabel.text = GetUnstagedHeaderText(GetVisibleAssetCount(visibleUnstagedItems));
             }
 
             if (stagedHeaderLabel != null)
             {
-                stagedHeaderLabel.text = GetStagedHeaderText(visibleStagedItems.Count);
+                stagedHeaderLabel.text = GetStagedHeaderText(GetVisibleAssetCount(visibleStagedItems));
             }
 
             if (touchedUnstaged)
@@ -3095,14 +3204,14 @@ namespace TLNexus.GitU
             UpdateActionButtonsEnabled();
             UpdateCommitButtonsEnabled();
 
-            var gitRoot = GitUtility.ProjectRoot;
-            if (string.IsNullOrEmpty(gitRoot))
+            var repoRoots = GitUtility.GetRepositoryRootsForUnityProject();
+            if (repoRoots == null || repoRoots.Count == 0)
             {
                 refreshInProgress = false;
                 UpdateActionButtonsEnabled();
                 UpdateCommitButtonsEnabled();
 
-                infoMessages.Add("未找到 Git 根目录。");
+                infoMessages.Add("未找到任何 Git 仓库。");
                 assetInfos.Clear();
                 assetTypeCache.Clear();
                 selectedUnstagedPaths.Clear();
@@ -3136,6 +3245,15 @@ namespace TLNexus.GitU
             skipRefreshUiDuringAutoStage = false;
 
             gitChanges = changes ?? new List<GitChangeEntry>();
+
+            activeRepositoryRoots = gitChanges
+                .Select(c => c.RepoRoot)
+                .Where(p => !string.IsNullOrWhiteSpace(p))
+                .Select(p => p.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            hasMultipleRepositories = activeRepositoryRoots.Count > 1;
 
             // 检测同时是 staged 和 unstaged 的文件（已暂存但又被修改），自动将新修改也暂存
             // 只在第一次刷新时执行，防止无限循环
@@ -3174,7 +3292,14 @@ namespace TLNexus.GitU
             UpdateAssetInfosIncrementally(gitChanges);
             CaptureInitialStagedSnapshotIfNeeded();
 
-            if (!hasShownPreexistingStagedHint && initialStagedPaths != null && initialStagedPaths.Count > 0)
+            if (hasMultipleRepositories)
+            {
+                infoMessages.Add(isChineseUi
+                    ? $"检测到多个 Git 仓库（{activeRepositoryRoots.Count} 个）。GitU 将按仓库分别执行暂存/提交；为避免跨仓库误操作，已跳过“外部暂存自动清理”。"
+                    : $"Multiple Git repositories detected ({activeRepositoryRoots.Count}). GitU will stage/commit per-repo; auto-clean of external staged items is skipped to avoid cross-repo operations.");
+            }
+
+            if (!hasMultipleRepositories && !hasShownPreexistingStagedHint && initialStagedPaths != null && initialStagedPaths.Count > 0)
             {
                 hasShownPreexistingStagedHint = true;
                 infoMessages.Add("提示：右侧“待提交/已暂存”读取的是 Git 暂存区（index）。窗口会自动清理“非本工具暂存”的条目；如需手动清空可执行：git restore --staged .");
@@ -3239,7 +3364,7 @@ namespace TLNexus.GitU
 
                     if (info == null)
                     {
-                        info = new GitAssetInfo(change.Path, change.OriginalPath, change.ChangeType, lastTime, change.WorkingTreeTime, change.IsStaged, change.IsUnstaged);
+                        info = new GitAssetInfo(change.Path, change.OriginalPath, change.ChangeType, lastTime, change.WorkingTreeTime, change.IsStaged, change.IsUnstaged, change.RepoRoot);
                     }
                     else
                     {
@@ -3250,6 +3375,7 @@ namespace TLNexus.GitU
                         info.WorkingTreeTime = change.WorkingTreeTime;
                         info.IsStaged = change.IsStaged;
                         info.IsUnstaged = change.IsUnstaged;
+                        info.RepoRoot = change.RepoRoot;
                     }
 
                     updated.Add(info);
@@ -3275,6 +3401,11 @@ namespace TLNexus.GitU
 
         private void PruneStagedAllowListToCurrentIndex()
         {
+            if (hasMultipleRepositories)
+            {
+                return;
+            }
+
             if (stagedAllowList.Count == 0)
             {
                 return;
@@ -3311,6 +3442,11 @@ namespace TLNexus.GitU
 
         private bool TryStartAutoCleanExternalStagedOnOpen(List<string> infoMessages)
         {
+            if (hasMultipleRepositories)
+            {
+                return false;
+            }
+
             if (!autoCleanExternalStagedOnOpen || hasAutoCleanedExternalStagedOnOpen)
             {
                 return false;
@@ -3887,12 +4023,12 @@ namespace TLNexus.GitU
             }
 
             var normalizedMessage = message.Trim();
-            var gitRoot = GitUtility.ProjectRoot;
             _ = GitUtility.UnityProjectFolder;
+            var repositoryRoots = GitUtility.GetRepositoryRootsForUnityProject().ToList();
 
-            if (string.IsNullOrEmpty(gitRoot))
+            if (repositoryRoots.Count == 0)
             {
-                EditorUtility.DisplayDialog("提交", "未找到 Git 根目录。", "确定");
+                EditorUtility.DisplayDialog("提交", "未找到任何 Git 仓库。", "确定");
                 return;
             }
 
@@ -3912,9 +4048,29 @@ namespace TLNexus.GitU
 
                 if (preexistingStagedCount > 0)
                 {
+                    var breakdown = string.Empty;
+                    if (hasMultipleRepositories)
+                    {
+                        var stagedByRepo = assetInfos
+                            .Where(a => a != null && a.IsStaged)
+                            .GroupBy(a =>
+                            {
+                                var name = GitUtility.GetRepositoryDisplayName(a.RepoRoot);
+                                return string.IsNullOrWhiteSpace(name) ? "Unknown" : name;
+                            })
+                            .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+                            .Select(g => $"- {g.Key}: {g.Count()}")
+                            .ToList();
+
+                        if (stagedByRepo.Count > 0)
+                        {
+                            breakdown = "\n\n" + string.Join("\n", stagedByRepo);
+                        }
+                    }
+
                     var confirmed = EditorUtility.DisplayDialog(
                         "安全确认",
-                        $"将提交 {stagedPathsNow.Count} 个待提交条目。\n\n是否继续提交？",
+                        $"将提交 {stagedPathsNow.Count} 个待提交条目。{breakdown}\n\n是否继续提交？",
                         "继续提交",
                         "取消");
 
@@ -3936,29 +4092,53 @@ namespace TLNexus.GitU
             var isChinese = isChineseUi;
             gitOperationTask = Task.Run(() =>
             {
-                if (!GitUtility.CommitGit(gitRoot, normalizedMessage, isChinese, out var commitSummary))
+                var rootsToCommit = new List<string>();
+                foreach (var root in repositoryRoots)
                 {
-                    return new GitOperationResult(false, commitSummary, false, null);
-                }
-
-                var finalSummary = commitSummary;
-                if (pushAfter)
-                {
-                    if (GitUtility.PushGit(gitRoot, isChinese, out var pushSummary))
+                    if (GitUtility.HasStagedChanges(root))
                     {
-                        finalSummary = commitSummary + "\\n" + pushSummary;
-                    }
-                    else
-                    {
-                        var pushFailMessage = isChinese
-                            ? "\\n推送失败：远程可能已有新的提交，请在 Git 客户端中先拉取更新并解决冲突后再推送。"
-                            : "\\nPush failed: Remote may have new commits. Please pull updates and resolve conflicts in your Git client before pushing again.";
-                        var extraInfo = string.IsNullOrEmpty(pushSummary) ? string.Empty : "\\n" + pushSummary;
-                        finalSummary = commitSummary + pushFailMessage + extraInfo;
+                        rootsToCommit.Add(root);
                     }
                 }
 
-                return new GitOperationResult(true, finalSummary, true, normalizedMessage);
+                if (rootsToCommit.Count == 0)
+                {
+                    var noStaged = isChinese ? "当前没有已暂存的变更可提交。" : "No staged changes to commit.";
+                    return new GitOperationResult(false, noStaged, false, null);
+                }
+
+                var summaries = new List<string>();
+                foreach (var root in rootsToCommit)
+                {
+                    var repoName = GitUtility.GetRepositoryDisplayName(root);
+                    var prefix = rootsToCommit.Count == 1 || string.IsNullOrWhiteSpace(repoName) ? string.Empty : $"{repoName}: ";
+
+                    if (!GitUtility.CommitGit(root, normalizedMessage, isChinese, out var commitSummary))
+                    {
+                        var failureLines = new List<string>(summaries) { prefix + commitSummary };
+                        return new GitOperationResult(false, string.Join("\n", failureLines), false, null);
+                    }
+
+                    summaries.Add(prefix + commitSummary);
+
+                    if (pushAfter)
+                    {
+                        if (GitUtility.PushGit(root, isChinese, out var pushSummary))
+                        {
+                            summaries.Add(prefix + pushSummary);
+                        }
+                        else
+                        {
+                            var pushFailMessage = isChinese
+                                ? "推送失败：远程可能已有新的提交，请在 Git 客户端中先拉取更新并解决冲突后再推送。"
+                                : "Push failed: Remote may have new commits. Please pull updates and resolve conflicts in your Git client before pushing again.";
+                            var extraInfo = string.IsNullOrEmpty(pushSummary) ? string.Empty : "\n" + pushSummary;
+                            summaries.Add(prefix + pushFailMessage + extraInfo);
+                        }
+                    }
+                }
+
+                return new GitOperationResult(true, string.Join("\n", summaries), true, normalizedMessage);
             });
             gitOperationTask.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
         }
@@ -4045,6 +4225,9 @@ namespace TLNexus.GitU
             var unstaged = ApplySortToAssetList(EnumerateFilteredAssets(false).ToList());
             var staged = ApplySortToAssetList(EnumerateFilteredAssets(true).ToList());
 
+            var unstagedDisplayList = BuildDisplayListWithRepositoryHeaders(unstaged, stagedView: false);
+            var stagedDisplayList = BuildDisplayListWithRepositoryHeaders(staged, stagedView: true);
+
             var validUnstaged = new HashSet<string>(unstaged.Select(i => i.AssetPath), StringComparer.OrdinalIgnoreCase);
             foreach (var path in selectedUnstagedPaths.ToList())
             {
@@ -4074,9 +4257,9 @@ namespace TLNexus.GitU
             }
 
             visibleUnstagedItems.Clear();
-            visibleUnstagedItems.AddRange(unstaged);
+            visibleUnstagedItems.AddRange(unstagedDisplayList);
             visibleStagedItems.Clear();
-            visibleStagedItems.AddRange(staged);
+            visibleStagedItems.AddRange(stagedDisplayList);
 
             UpdateListEmptyHints();
 
@@ -4093,6 +4276,72 @@ namespace TLNexus.GitU
             {
                 stagedScroll.schedule.Execute(() => { stagedScroll.scrollOffset = stagedScrollOffset; });
             }
+        }
+
+        private List<GitAssetInfo> BuildDisplayListWithRepositoryHeaders(List<GitAssetInfo> items, bool stagedView)
+        {
+            items ??= new List<GitAssetInfo>();
+
+            if (!hasMultipleRepositories || items.Count == 0)
+            {
+                return items;
+            }
+
+            var byRoot = new Dictionary<string, List<GitAssetInfo>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var info in items)
+            {
+                if (info == null || info.IsHeader)
+                {
+                    continue;
+                }
+
+                var root = info.RepoRoot ?? string.Empty;
+                if (!byRoot.TryGetValue(root, out var list))
+                {
+                    list = new List<GitAssetInfo>();
+                    byRoot[root] = list;
+                }
+
+                list.Add(info);
+            }
+
+            var groups = byRoot
+                .Where(kvp => kvp.Value != null && kvp.Value.Count > 0)
+                .Select(kvp =>
+                {
+                    var name = GitUtility.GetRepositoryDisplayName(kvp.Key);
+                    return new
+                    {
+                        RepoRoot = kvp.Key,
+                        RepoName = string.IsNullOrWhiteSpace(name) ? "Unknown" : name,
+                        Items = kvp.Value
+                    };
+                })
+                .OrderBy(g => g.RepoName, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var result = new List<GitAssetInfo>(items.Count + groups.Count);
+            foreach (var group in groups)
+            {
+                var title = isChineseUi
+                    ? $"仓库：{group.RepoName}（{group.Items.Count}）"
+                    : $"Repo: {group.RepoName} ({group.Items.Count})";
+                result.Add(new GitAssetInfo(
+                    path: string.Empty,
+                    originalPath: null,
+                    type: GitChangeType.Unknown,
+                    lastTime: null,
+                    workingTime: null,
+                    isStaged: stagedView,
+                    isUnstaged: !stagedView,
+                    repoRoot: group.RepoRoot,
+                    isHeader: true,
+                    headerText: title));
+
+                result.AddRange(group.Items);
+            }
+
+            return result;
         }
 
         private void EnsureAssetListViewsConfigured()
@@ -4418,6 +4667,7 @@ namespace TLNexus.GitU
             var refs = new AssetRowRefs
             {
                 StagedView = stagedView,
+                IconContainer = iconContainer,
                 IconImage = iconImage,
                 NameLabel = nameLabel,
                 PathLabel = pathInfoLabel,
@@ -4428,6 +4678,11 @@ namespace TLNexus.GitU
 
             container.RegisterCallback<MouseEnterEvent>(_ =>
             {
+                if (refs.Info != null && refs.Info.IsHeader)
+                {
+                    return;
+                }
+
                 if (container.ClassListContains("gitU-asset-item--selected"))
                 {
                     return;
@@ -4437,6 +4692,11 @@ namespace TLNexus.GitU
             });
             container.RegisterCallback<MouseLeaveEvent>(_ =>
             {
+                if (refs.Info != null && refs.Info.IsHeader)
+                {
+                    return;
+                }
+
                 if (container.ClassListContains("gitU-asset-item--selected"))
                 {
                     return;
@@ -4447,6 +4707,11 @@ namespace TLNexus.GitU
 
             row.RegisterCallback<PointerDownEvent>(evt =>
             {
+                if (refs.Info != null && refs.Info.IsHeader)
+                {
+                    return;
+                }
+
                 if (evt.button == 1)
                 {
                     var info = refs.Info;
@@ -4477,6 +4742,11 @@ namespace TLNexus.GitU
 
             row.RegisterCallback<PointerMoveEvent>(evt =>
             {
+                if (refs.Info != null && refs.Info.IsHeader)
+                {
+                    return;
+                }
+
                 if (!refs.DragArmed || (evt.pressedButtons & 1) == 0)
                 {
                     return;
@@ -4517,7 +4787,7 @@ namespace TLNexus.GitU
             container.AddManipulator(new ContextualMenuManipulator(evt =>
             {
                 var info = refs.Info;
-                if (info == null || string.IsNullOrEmpty(info.AssetPath))
+                if (info == null || info.IsHeader || string.IsNullOrEmpty(info.AssetPath))
                 {
                     return;
                 }
@@ -4854,6 +5124,56 @@ namespace TLNexus.GitU
             refs.Info = info;
             refs.BoundIndex = index;
 
+            if (info != null && info.IsHeader)
+            {
+                element.EnableInClassList("gitU-asset-item--selected", false);
+                element.parent?.EnableInClassList("gitU-list-item--selected", false);
+
+                ApplyAssetItemSelectionVisual(element, selected: false);
+                ApplyListItemWrapperBaseVisual(element.parent, selected: false);
+
+                element.style.backgroundColor = Rgba(255, 255, 255, 0.06f);
+                element.style.borderBottomColor = Rgb(20, 20, 20);
+
+                if (refs.IconContainer != null)
+                {
+                    refs.IconContainer.style.display = DisplayStyle.None;
+                }
+                if (refs.IconImage != null)
+                {
+                    refs.IconImage.image = null;
+                }
+
+                if (refs.ChangeBadgeContainer != null)
+                {
+                    refs.ChangeBadgeContainer.style.display = DisplayStyle.None;
+                }
+
+                if (refs.NameLabel != null)
+                {
+                    refs.NameLabel.text = info.HeaderText ?? string.Empty;
+                    refs.NameLabel.style.color = new Color(0.78f, 0.84f, 1.0f);
+                }
+
+                if (refs.PathLabel != null)
+                {
+                    refs.PathLabel.text = string.Empty;
+                    refs.PathLabel.style.display = DisplayStyle.None;
+                }
+
+                return;
+            }
+
+            if (refs.IconContainer != null)
+            {
+                refs.IconContainer.style.display = DisplayStyle.Flex;
+            }
+
+            if (refs.PathLabel != null)
+            {
+                refs.PathLabel.style.display = DisplayStyle.Flex;
+            }
+
             var isSelected = stagedView
                 ? selectedStagedPaths.Contains(info.AssetPath)
                 : selectedUnstagedPaths.Contains(info.AssetPath);
@@ -4862,11 +5182,11 @@ namespace TLNexus.GitU
 
             ApplyAssetItemSelectionVisual(element, isSelected);
             ApplyListItemWrapperBaseVisual(element.parent, isSelected);
+            element.style.borderBottomColor = Rgb(20, 20, 20);
 
             if (refs.IconImage != null)
             {
-                var icon = string.IsNullOrEmpty(info.AssetPath) ? null : AssetDatabase.GetCachedIcon(info.AssetPath);
-                refs.IconImage.image = icon != null ? icon : EditorGUIUtility.IconContent("DefaultAsset Icon").image as Texture2D;
+                refs.IconImage.image = GetTypeIconForAssetPath(info.AssetPath);
             }
 
             if (refs.NameLabel != null)
@@ -4973,6 +5293,93 @@ namespace TLNexus.GitU
 
                 refs.PathLabel.text = $"{displayPath} ｜ {timeText}";
             }
+        }
+
+        private static Texture2D GetTypeIconForAssetPath(string assetPath)
+        {
+            if (cachedDefaultAssetIcon == null)
+            {
+                cachedDefaultAssetIcon = EditorGUIUtility.IconContent("DefaultAsset Icon")?.image as Texture2D;
+            }
+
+            if (string.IsNullOrWhiteSpace(assetPath))
+            {
+                return cachedDefaultAssetIcon;
+            }
+
+            assetPath = GitUtility.NormalizeAssetPath(assetPath);
+
+            if (AssetDatabase.IsValidFolder(assetPath))
+            {
+                if (cachedFolderIcon == null)
+                {
+                    cachedFolderIcon = EditorGUIUtility.IconContent("Folder Icon")?.image as Texture2D ?? cachedDefaultAssetIcon;
+                }
+
+                return cachedFolderIcon;
+            }
+
+            var typePath = assetPath.EndsWith(".meta", StringComparison.OrdinalIgnoreCase)
+                ? assetPath.Substring(0, assetPath.Length - 5)
+                : assetPath;
+
+            Type mainType = null;
+            try
+            {
+                mainType = AssetDatabase.GetMainAssetTypeAtPath(typePath);
+            }
+            catch
+            {
+                // ignored
+            }
+
+            if (mainType == null)
+            {
+                return cachedDefaultAssetIcon;
+            }
+
+            if ((mainType == typeof(Texture2D) || mainType == typeof(Sprite)) && TryGetUIImageIcon(out var uiImageIcon))
+            {
+                return uiImageIcon;
+            }
+
+            if (TypeIconCache.TryGetValue(mainType, out var cached) && cached != null)
+            {
+                return cached;
+            }
+
+            var icon = EditorGUIUtility.ObjectContent(null, mainType)?.image as Texture2D;
+            icon ??= cachedDefaultAssetIcon;
+            TypeIconCache[mainType] = icon;
+            return icon;
+        }
+
+        private static bool TryGetUIImageIcon(out Texture2D icon)
+        {
+            if (cachedUIImageIcon != null)
+            {
+                icon = cachedUIImageIcon;
+                return true;
+            }
+
+            try
+            {
+                // Avoid hard dependency on UnityEngine.UI to keep GitU usable in projects without UGUI.
+                var uiImageType = Type.GetType("UnityEngine.UI.Image, UnityEngine.UI", throwOnError: false);
+                if (uiImageType != null)
+                {
+                    cachedUIImageIcon = EditorGUIUtility.ObjectContent(null, uiImageType)?.image as Texture2D;
+                }
+
+                cachedUIImageIcon ??= EditorGUIUtility.IconContent("Image Icon")?.image as Texture2D;
+            }
+            catch
+            {
+                // ignored
+            }
+
+            icon = cachedUIImageIcon;
+            return icon != null;
         }
 
         private static void ApplyAssetItemSelectionVisual(VisualElement item, bool selected)
@@ -5261,8 +5668,6 @@ namespace TLNexus.GitU
             }
 
             relevantMetaGuids ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            var gitRoot = GitUtility.ProjectRoot;
             _ = GitUtility.UnityProjectFolder;
 
             // If Git does not detect a rename (and outputs "A + D" instead),
@@ -5288,15 +5693,15 @@ namespace TLNexus.GitU
                 }
 
                 var matched = relevantFileNames.Contains(deletedName);
-                if (!matched && relevantMetaGuids.Count > 0 &&
-                    !string.IsNullOrEmpty(gitRoot))
+                if (!matched && relevantMetaGuids.Count > 0)
                 {
                     var deletedMetaUnityPath = deletedPath.EndsWith(".meta", StringComparison.OrdinalIgnoreCase)
                         ? deletedPath
                         : $"{deletedPath}.meta";
 
-                    if (GitUtility.TryGetGitRelativePath(deletedMetaUnityPath, out var gitRelativeMetaPath) &&
-                        GitUtility.TryGetMetaGuidFromHead(gitRoot, gitRelativeMetaPath, out var deletedGuid) &&
+                    if (GitUtility.TryGetGitRelativePath(deletedMetaUnityPath, out var metaRepoRoot, out var gitRelativeMetaPath) &&
+                        !string.IsNullOrEmpty(metaRepoRoot) &&
+                        GitUtility.TryGetMetaGuidFromHead(metaRepoRoot, gitRelativeMetaPath, out var deletedGuid) &&
                         !string.IsNullOrEmpty(deletedGuid) &&
                         relevantMetaGuids.Contains(deletedGuid))
                     {
