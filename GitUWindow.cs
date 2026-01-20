@@ -20,7 +20,7 @@ namespace TLNexus.GitU
         private static Texture2D cachedUIImageIcon;
 
         private const string WindowTitle = "GitU";
-        private const string MenuPath = "Window/T·L Nexus/GitU";
+        private const string MenuPath = "Window/T·L NEXUS/GitU";
         private const string CommitHistoryFileName = "GitUCommitHistory.json";
         private const string LegacyCommitHistoryFileName = "QuickGitCommitHistory.json";
         private const int MaxCommitHistoryEntries = 8100;
