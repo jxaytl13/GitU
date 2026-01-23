@@ -1314,7 +1314,11 @@ namespace TLNexus.GitU
             }
             if (refreshButton != null)
             {
-                refreshButton.clicked += () => { RequestRefreshData(false); };
+                refreshButton.clicked += () =>
+                {
+                    listEnterAnimationPending = true;
+                    RequestRefreshData(false);
+                };
             }
             if (commitMessageField != null)
             {
@@ -5920,6 +5924,12 @@ namespace TLNexus.GitU
                     }
                     else
                     {
+                        if (thisSet.Count > 1)
+                        {
+                            thisSet.Clear();
+                            thisSet.Add(pointerDownInfo.AssetPath);
+                        }
+
                         if (stagedView)
                         {
                             stagedSelectionAnchorIndex = refs.BoundIndex;
