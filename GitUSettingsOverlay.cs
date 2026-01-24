@@ -1050,14 +1050,15 @@ namespace TLNexus.GitU
                 return;
             }
 
-            // Material Design (Android) switch style (copied from HierarchyCube settings window).
+            // Switch style aligned with HierarchyCube settings window.
             const float trackWidth = 28f;
             const float trackHeight = 14f;
-            const float thumbSize = 18f;
-            const float thumbOverflow = (thumbSize - trackHeight) * 0.5f;
+            const float thumbSize = 9f;
+            const float thumbInset = 2f;
+            float thumbOverflow = Mathf.Max(0f, (thumbSize - trackHeight) * 0.5f);
 
             toggle.style.width = trackWidth + thumbOverflow * 2;
-            toggle.style.height = thumbSize;
+            toggle.style.height = Mathf.Max(trackHeight, thumbSize);
             toggle.style.overflow = Overflow.Visible;
 
             input.style.marginLeft = 0;
@@ -1079,9 +1080,9 @@ namespace TLNexus.GitU
             input.style.borderBottomLeftRadius = trackHeight * 0.5f;
             input.style.borderBottomRightRadius = trackHeight * 0.5f;
 
-            checkmark.style.alignSelf = Align.Center;
             checkmark.style.position = Position.Absolute;
-            checkmark.style.top = -thumbOverflow;
+            float verticalInset = (trackHeight - thumbSize) * 0.5f;
+            checkmark.style.top = verticalInset - thumbOverflow;
             checkmark.style.width = thumbSize;
             checkmark.style.height = thumbSize;
             checkmark.style.borderTopLeftRadius = thumbSize * 0.5f;
@@ -1140,7 +1141,7 @@ namespace TLNexus.GitU
                     checkmark.style.borderLeftColor = border;
                 }
 
-                checkmark.style.left = checkedOn ? (trackWidth - thumbSize + thumbOverflow + 2) : 0;
+                checkmark.style.left = checkedOn ? (trackWidth - thumbSize - thumbInset - 1f) : (thumbInset + 1f);
                 checkmark.style.opacity = 1f;
             }
 
@@ -1323,7 +1324,7 @@ namespace TLNexus.GitU
         {
             var button = new Button();
 
-            // 对齐“提交并推送”按钮风格：默认强调色填充 + 强调色描边 + 黑字；悬停时白底白描边。
+            // Align with the "Commit & Push" button style: accent fill + accent border + black text; hover turns white.
             var accent = new Color(57f / 255f, 209f / 255f, 157f / 255f, 1f);
             var normalBg = accent;
             var hoverBg = Color.white;

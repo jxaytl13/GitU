@@ -1,199 +1,83 @@
-# GitU 使用说明（Unity 编辑器内 Git 快捷提交）
+# GitU (Git commits inside the Unity Editor)
 
-本工具建议放置于 `Assets/Editor/GitU`，用于在 Unity 编辑器内查看 Git 变更、选择性暂存（stage）/取消暂存（unstage），并完成提交与可选推送。
+GitU brings the full flow—"review changes → pick files → stage → commit/push"—into the Unity Editor, so you can ship a clean commit without leaving Unity.
 
-## 1. 环境要求
+> Recommended location: `Assets/Editor/GitU`
 
-- 工程必须位于 Git 仓库中（目录树上方存在 `.git`）。
-- 本机已安装 Git，并且命令行可直接执行 `git`（已加入 `PATH`）。
-- 建议已为当前分支配置 upstream（否则 `git push` 可能失败）。
+## Key highlights
 
-## 2. 打开方式
+- **Safer by default**: If you don't pick a target asset/folder, GitU shows nothing—reducing the chance of accidentally committing the entire repo.
+- **Selective commits, fast**: Unstaged on the left, Staged on the right; drag & drop to stage/unstage; supports multi-select and filtering.
+- **Optimized for Unity workflows**: Open directly from Project/Hierarchy; understands Unity asset types (Prefab/Scene/Texture...); focuses changes by target scope.
+- **Doesn't freeze the Editor**: Refresh, stage/unstage, commit, and push run asynchronously with status feedback.
+- **Works with multiple repos**: If multiple `.git` roots exist under the project tree, changes are grouped per repo and operations run per repo.
+- **Commit messages made easy**: Keeps a local commit message history for quick reuse.
+- **Optional external Git client handoff**: After commit/push, clicking "OK" in the result dialog can open your configured Git client (UGit / SourceTree / GitHub Desktop, etc.).
 
-工具以 `EditorWindow` 形式提供，可从三个入口打开：
+## Requirements
 
-- 顶部菜单：`Window/T·L Nexus/GitU`
-- Project 视图：选中任意资源 → 右键菜单 `Assets/快捷Git提交`
-- Hierarchy 视图：选中任意 GameObject → 右键菜单 `GameObject/快捷Git提交`
+- The Unity project must be inside a Git repository (a `.git` exists in a parent directory).
+- Git must be installed and `git` must be available in `PATH`.
+- If you use "Commit & Push", an upstream should be configured (otherwise `git push` may fail).
 
-打开后窗口标题为“GitU”。
+## 3‑minute quick start (recommended)
 
-## 3. 界面与概念说明
+1. **Pick a target**: Select a file/folder in Project, or select a GameObject in Hierarchy (GitU will try to map it to Prefab/Scene assets).
+2. **Open GitU**: Menu `Window/T·L NEXUS/GitU`, or right-click:
+   - `Assets/T·L NEXUS/GitU`
+   - `GameObject/T·L NEXUS/GitU`
+3. **Refresh & review**: Confirm Unstaged changes on the left are what you want (filter by Added/Modified/Deleted + asset type + search).
+4. **Drag to stage**: Drag items from Unstaged → Staged (typically include the `.meta` file when applicable).
+5. **Commit**:
+   - `Commit`: commit locally
+   - `Commit & Push`: commit + push
 
-### 3.1 目标资源（Target）
+## High-frequency features
 
-窗口顶部有“目标资源”字段：
+### 1) Target scope
 
-- 不选择目标资源：不显示变更（请先选择目标资源后再打开窗口，或在顶部选择目标资源）。
-- 选择文件：工具会优先显示与该资源相关的变更（包含依赖、引用等相关项，具体以工具计算结果为准）。
-- 选择文件夹：显示该文件夹（及子路径）下的变更。
+- **No target**: shows no changes (safety-first).
+- **File target**: prioritizes changes related to that asset (may include dependencies/references; exact behavior depends on GitU’s calculation).
+- **Folder target**: shows changes under that folder (and subpaths).
 
-提示：目标资源变更会自动触发刷新。
+### 2) Two lists: Unstaged ↔ Staged
 
-### 3.2 变更区域（左侧/右侧）
+- Left: Unstaged
+- Right: Staged (what actually goes into `git commit`)
 
-- 左侧：未暂存（Unstaged）变更
-- 右侧：已暂存（Staged）变更（也就是将被 `git commit` 提交的内容）
+Common interactions:
 
-每条变更项包含：
+- Click to locate; double-click to copy filename/path (Unity paths like `Assets/...`).
+- Right-click `Discard Changes`: discards selected changes (high-risk; see notes below).
 
-- 图标：资源图标（用于识别类型）
-- 文件名（单击定位、双击复制文件名）
-- 路径｜时间（双击复制 Unity 路径，例如 `Assets/...`；时间为工作区修改时间）
-- 右键菜单：
-  - `放弃更改`：放弃选中内容的变更（不可撤销，见注意事项）
+### 3) Filter + sort
 
-### 3.3 筛选与搜索
+- Change type: Added / Modified / Deleted
+- Asset type: Prefab / Scene / Texture ... (and All)
+- Search: filters by filename/path (applies to both lists)
+- Sort: by status/type/name/time/path (handy for large commits)
 
-窗口提供多种过滤条件：
+### 4) Settings
 
-- 变更类型：新增 / 修改 / 删除
-- 资源类型：按资源类型过滤（All / Prefab / Scene / Texture ...）
-- 搜索：按文件名/路径进行过滤（用于“变更区 + 待提交区”）
+You can enable/configure:
 
-### 3.4 异步执行说明（避免卡编辑器）
+- **Auto save before opening GitU (Ctrl+S)**: Saves once when opening GitU (`Save Assets + Save Open Scenes`, and attempts to save PrefabStage) to avoid missing changes that aren’t written to disk yet.
+- **Open Git client after commit**: After Commit/Commit & Push, clicking "OK" in the result dialog opens the external Git client; you can also set the client executable path.
+- **CN/EN switch**: The settings panel supports language switching.
 
-以下操作均为异步执行：
+## Notes (recommended reading)
 
-- `刷新`（读取 `git status`）
-- 左侧拖拽到右侧（stage）
-- 右侧拖拽回左侧（unstage）
-- `提交到本地` / `提交并推送`
+- `Discard Changes` is **irreversible**: it may involve reset / checkout / clean (deleting untracked files). Confirm you don’t need the changes; back up or `git stash` first if necessary.
+- `Commit & Push` is essentially `git push`: it does not automatically `pull/rebase`. If you hit "rejected", resolve sync/conflicts in your external client/CLI first.
 
-执行期间会临时禁用部分按钮，窗口状态栏会显示“正在刷新/正在提交…”等提示；完成后会自动刷新列表。
+## FAQ
 
-## 4. 提交步骤（推荐流程）
+- **Git root not found**: Ensure the Unity project is inside a Git repo; verify with `git rev-parse --show-toplevel` from the project folder.
+- **Git not available**: Install Git and make sure `git` is in `PATH`.
 
-### 步骤 1：打开窗口并刷新
+## Storage (local to this machine & project)
 
-1. 通过菜单 `Window/T·L Nexus/GitU` 打开窗口
-2. 点击 `刷新`（或在打开/切换目标资源后自动刷新）
-3. 确认左侧/右侧列表显示符合预期的变更
+- Commit message history: `Library/GitUCommitHistory.json`
+- Staged allowlist (for handling "externally staged" scenarios): `Library/GitUStagedAllowList.json`
 
-### 步骤 2：筛选要提交的变更
-
-1. 通过“目标资源”、变更类型、资源类型、搜索框，缩小候选范围
-2. 在左侧未暂存列表中，选中你要提交的条目（支持 Ctrl/Cmd 多选、Shift 连选）
-   - 如果某个资源的 `.meta` 也有变更，通常需要同时选中对应的 `.meta` 条目
-
-### 步骤 3：发送至待提交（Stage）
-
-1. 将选中的条目从左侧拖拽到右侧
-2. 工具会执行 `git add`（删除项会用 `git add -u`）
-3. 完成后，这些条目会移动到右侧“已暂存”列表
-
-### 步骤 4：检查待提交内容（可选但建议）
-
-1. 确认右侧已暂存列表中包含你期望提交的文件
-2. 如需撤回某些已暂存条目：
-   - 选中右侧条目 → 拖拽回左侧（等价于 `git reset HEAD -- <path>`）
-
-### 步骤 5：填写提交说明
-
-1. 在“提交”区域的“说明”输入框中填写提交信息
-2. 可点击 `记录` 从历史提交说明中快速选择（双击某条历史可填充到输入框）
-
-### 步骤 6：提交（Commit）
-
-二选一：
-
-- 点击 `提交到本地`：执行 `git commit -m "<message>"`
-- 点击 `提交并推送`：先 commit，再执行 `git push`
-
-完成后会弹出结果对话框，并自动刷新列表；提交成功会写入提交说明历史。
-
-## 5. 注意事项与常见问题
-
-### 5.1 “未找到 Git 根目录”
-
-可能原因：
-
-- 工程不在 Git 仓库内（没有 `.git`）
-- Git 子模块/嵌套仓库导致定位失败
-
-处理建议：
-
-- 确认工程根目录是仓库根，或至少位于仓库内部
-- 在命令行进入工程目录执行 `git rev-parse --show-toplevel` 验证
-
-### 5.8 多仓库/嵌套仓库（仓库内再放一个仓库但不是子模块）
-
-当 Unity 工程目录树内存在多个 `.git`（例如把 B 仓库直接放进 A 仓库的 `Assets/...` 里），GitU 会在刷新时同时读取多个仓库的 `git status`：
-
-- 变更列表会按仓库分组，并显示“仓库：xxx”标题行
-- 暂存/取消暂存/提交/推送会按仓库分别执行（不是原子操作）
-- 为避免跨仓库误操作，“外部暂存自动清理”在多仓库模式下会自动跳过
-
-### 5.2 Git 未安装 / `git` 不可用
-
-表现：刷新/提交失败，并在 Console 出现 “无法执行Git命令/调用 git 失败” 等日志。
-
-处理建议：安装 Git 并确保 `git` 可在命令行直接运行。
-
-### 5.3 推送失败（Push rejected / 没有 upstream）
-
-本工具的推送等价于直接执行 `git push`，不包含 `pull/rebase`。
-
-常见原因：
-
-- 远端已有新提交导致拒绝推送
-- 当前分支未配置 upstream（首次 push 需设置）
-
-处理建议：
-
-- 使用 UGit/SourceTree/命令行先拉取更新并解决冲突，再推送
-- 必要时先在命令行执行一次带 upstream 的 push（例如 `git push -u origin <branch>`）
-
-### 5.4 “放弃更改”不可撤销（高风险）
-
-选中条目后右键菜单里的 `放弃更改` 会尝试恢复到仓库状态，包含但不限于：
-
-- 已暂存内容可能先 reset
-- 已跟踪文件会 checkout 回 HEAD
-- 新增的未跟踪文件可能被 `git clean` 删除（文件夹会用 `-fd`）
-
-执行前请确认：
-
-- 这些改动确实不需要保留
-- 如有必要，先手动备份文件或通过 git stash 保护
-
-### 5.5 超时与性能
-
-工具对 git 命令设置了超时（用于避免无限卡死）：
-
-- 刷新 / stage / unstage：约 30s
-- commit：约 120s
-- push：约 300s
-
-如果仓库很大或磁盘很慢，建议减少过滤范围、关闭其他占用 IO 的任务，或在命令行先执行对应 git 命令确认耗时。
-
-### 5.6 文件名包含特殊字符
-
-工具使用 `git status --porcelain=v1 -z` 并按 NUL 分隔解析，能更稳健地处理包含空格、换行等字符的路径；但仍建议避免极端文件名（特别是包含控制字符的名称）。
-
-### 5.7 打开窗口时右侧“待提交”已有内容
-
-右侧“待提交/已暂存”列表读取的是 Git 暂存区（index），不是工具内部缓存。
-
-因此如果你曾在命令行或其他客户端（例如 UGit/SourceTree）执行过 `git add`（或在 `git pull --autostash` 等流程中被恢复了暂存状态），再次打开窗口时右侧可能已经有内容。
-
-处理方式：
-
-- 在右侧勾选条目 → 点击 `<` 移出（等价 `git reset HEAD -- <path>`）
-- 或命令行执行 `git restore --staged .` 清空暂存区
-- 打开窗口会自动将“非本工具暂存”的条目从暂存区移出
-
-## 6. 数据存储位置
-
-提交说明历史会保存到：
-
-- `Library/GitUCommitHistory.json`
-
-本工具“暂存白名单”（用于自动清理外部暂存）会保存到：
-
-- `Library/GitUStagedAllowList.json`
-
-说明：
-
-- `Library` 通常不入库（一般在 `.gitignore` 中），因此该历史一般是“本机/本工程”级别，不会随代码同步给其他人。
-- 若你之前使用过旧版 `QuickGitCommit*` 文件名，本工具会自动读取旧文件作为兼容。
+> `Library` is typically ignored by Git (via `.gitignore`), so this data usually won’t sync to other machines.
