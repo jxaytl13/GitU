@@ -23,7 +23,6 @@ namespace TLNexus.GitU
         private const string WindowTitle = "GitU";
         private const string MenuPath = "Window/T·L NEXUS/GitU";
         private const string CommitHistoryFileName = "GitUCommitHistory.json";
-        private const string LegacyCommitHistoryFileName = "QuickGitCommitHistory.json";
         private const int MaxCommitHistoryEntries = 8100;
         private const int MaxCommitHistoryDisplayEntries = 100;
         private const string SortKeyPrefsKeyPrefix = "TLNexus.GitU.SortKey:";
@@ -4596,15 +4595,6 @@ namespace TLNexus.GitU
             savedCommitHistory = new List<string>();
             fallbackCommitHistory = new List<string>();
 
-            if (!File.Exists(path))
-            {
-                var legacyPath = GetCommitHistoryFilePath(LegacyCommitHistoryFileName);
-                if (File.Exists(legacyPath))
-                {
-                    path = legacyPath;
-                }
-            }
-
             if (File.Exists(path))
             {
                 string json;
@@ -7176,11 +7166,11 @@ namespace TLNexus.GitU
             return lastSlash > 0 ? assetPath.Substring(0, lastSlash) : assetPath;
         }
 
-        private static string GetCommitHistoryFilePath(string fileName = CommitHistoryFileName)
+        private static string GetCommitHistoryFilePath()
         {
             var projectFolder = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
             var libraryFolder = Path.Combine(projectFolder, "Library");
-            return Path.Combine(libraryFolder, fileName);
+            return Path.Combine(libraryFolder, CommitHistoryFileName);
         }
 
         private static string GetStagedAllowListFilePath(string fileName = StagedAllowListFileName)
