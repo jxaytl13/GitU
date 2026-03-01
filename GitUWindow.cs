@@ -15,10 +15,8 @@ namespace TLNexus.GitU
 {
     internal partial class GitUWindow : EditorWindow
     {
-        private static readonly Dictionary<Type, Texture2D> TypeIconCache = new Dictionary<Type, Texture2D>();
         private static Texture2D cachedFolderIcon;
         private static Texture2D cachedDefaultAssetIcon;
-        private static Texture2D cachedUIImageIcon;
 
         private const string WindowTitle = "GitU";
         private const string MenuPath = "Window/T·L NEXUS/GitU";
@@ -32,6 +30,7 @@ namespace TLNexus.GitU
         private const string AutoOpenGitClientAfterCommitPrefsKeyPrefix = "TLNexus.GitU.AutoOpenGitClientAfterCommit:";
         private const string GitClientPathPrefsKeyPrefix = "TLNexus.GitU.GitClientPath:";
         private const string StagedAllowListFileName = "GitUStagedAllowList.json";
+        private const string DeferredDragMovesFileName = "GitUDeferredDragMoves.json";
         private const string AssetTypeFilterPrefsKeyPrefix = "TLNexus.GitU.AssetTypeFilters:";
         private const string LegacyAssetTypeFilterPrefsKeyPrefix = "OneKey.GitTools.QuickGitCommit.AssetTypeFilters:";
         private const string AddedColorHex = "#80D980";
@@ -105,19 +104,39 @@ namespace TLNexus.GitU
             public readonly string Summary;
             public readonly bool CommitSucceeded;
             public readonly string CommittedMessage;
+            public readonly bool DeferredMovesApplied;
 
-            public GitOperationResult(bool success, string summary, bool commitSucceeded = false, string committedMessage = null)
+            public GitOperationResult(
+                bool success,
+                string summary,
+                bool commitSucceeded = false,
+                string committedMessage = null,
+                bool deferredMovesApplied = false)
             {
                 Success = success;
                 Summary = summary;
                 CommitSucceeded = commitSucceeded;
                 CommittedMessage = committedMessage;
+                DeferredMovesApplied = deferredMovesApplied;
             }
         }
 
         private Task<GitOperationResult> gitOperationTask;
         private bool gitOperationInProgress;
         private GitOperationKind gitOperationKind;
+        private readonly Queue<DeferredDragMoveRequest> deferredDragMoveQueue = new Queue<DeferredDragMoveRequest>();
+
+        private readonly struct DeferredDragMoveRequest
+        {
+            public readonly bool ToStaged;
+            public readonly List<string> AssetPaths;
+
+            public DeferredDragMoveRequest(bool toStaged, List<string> assetPaths)
+            {
+                ToStaged = toStaged;
+                AssetPaths = assetPaths ?? new List<string>();
+            }
+        }
 
         // 选择状态：左侧未暂存 / 右侧已暂存
         private readonly HashSet<string> selectedUnstagedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1229,6 +1248,7 @@ namespace TLNexus.GitU
             historyDropdownVisible = false;
             autoCleanExternalStagedOnOpen = true;
             LoadStagedAllowList();
+            LoadDeferredDragMoves();
             LoadAssetTypeFilters();
             LoadSortSettings();
             isChineseUi = EditorPrefs.GetInt(LanguagePrefKey, 1) != 0;
@@ -1872,6 +1892,12 @@ namespace TLNexus.GitU
 
             if (completedKind == GitOperationKind.Commit || completedKind == GitOperationKind.CommitAndPush)
             {
+                if (result.DeferredMovesApplied && deferredDragMoveQueue.Count > 0)
+                {
+                    deferredDragMoveQueue.Clear();
+                    SaveDeferredDragMoves();
+                }
+
                 // 隐藏进行中的中间提示条，避免在结果对话框/摘要显示时仍然可见
                 HideTempNotification();
 
@@ -2585,6 +2611,352 @@ namespace TLNexus.GitU
             UpdateChangeTypeButtonVisual(deletedButton, showDeleted, new Color(0.9f, 0.5f, 0.5f));
         }
 
+        private void EnqueueDeferredDragMove(bool toStaged, IEnumerable<string> assetPaths)
+        {
+            if (assetPaths == null)
+            {
+                return;
+            }
+
+            var paths = assetPaths
+                .Where(p => !string.IsNullOrWhiteSpace(p))
+                .Select(p => p.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (paths.Count == 0)
+            {
+                return;
+            }
+
+            deferredDragMoveQueue.Enqueue(new DeferredDragMoveRequest(toStaged, paths));
+            SaveDeferredDragMoves();
+        }
+
+        private List<DeferredDragMoveRequest> ConsumeDeferredDragMoves()
+        {
+            return deferredDragMoveQueue.ToList();
+        }
+
+        private void ApplyDeferredMovesToAssetInfos()
+        {
+            if (deferredDragMoveQueue.Count == 0 || assetInfos.Count == 0)
+            {
+                return;
+            }
+
+            foreach (var request in deferredDragMoveQueue)
+            {
+                if (request.AssetPaths == null || request.AssetPaths.Count == 0)
+                {
+                    continue;
+                }
+
+                var pathSet = new HashSet<string>(
+                    request.AssetPaths.Where(p => !string.IsNullOrWhiteSpace(p)).Select(p => p.Trim()),
+                    StringComparer.OrdinalIgnoreCase);
+                if (pathSet.Count == 0)
+                {
+                    continue;
+                }
+
+                foreach (var info in assetInfos)
+                {
+                    if (info == null || info.IsHeader || !pathSet.Contains(info.AssetPath))
+                    {
+                        continue;
+                    }
+
+                    info.IsStaged = request.ToStaged;
+                    info.IsUnstaged = !request.ToStaged;
+                }
+            }
+        }
+
+        private bool ApplyDeferredDragMovesBeforeCommit(IReadOnlyList<DeferredDragMoveRequest> operations, out string summary)
+        {
+            summary = string.Empty;
+            if (operations == null || operations.Count == 0)
+            {
+                return true;
+            }
+
+            var summaries = new List<string>();
+            for (var i = 0; i < operations.Count; i++)
+            {
+                var op = operations[i];
+                var ok = op.ToStaged
+                    ? RunStageRequestsForPaths(op.AssetPaths, out var opSummary)
+                    : RunUnstageRequestsForPaths(op.AssetPaths, out opSummary);
+
+                if (!string.IsNullOrWhiteSpace(opSummary))
+                {
+                    summaries.Add(opSummary);
+                }
+
+                if (!ok)
+                {
+                    summary = string.Join("\n", summaries.Where(s => !string.IsNullOrWhiteSpace(s)));
+                    if (string.IsNullOrWhiteSpace(summary))
+                    {
+                        summary = isChineseUi ? "提交前同步暂存区失败。" : "Failed to sync staged changes before commit.";
+                    }
+
+                    return false;
+                }
+            }
+
+            summary = string.Join("\n", summaries.Where(s => !string.IsNullOrWhiteSpace(s)));
+            return true;
+        }
+
+        private bool RunStageRequestsForPaths(IReadOnlyList<string> assetPaths, out string summary)
+        {
+            summary = string.Empty;
+            if (assetPaths == null || assetPaths.Count == 0)
+            {
+                return true;
+            }
+
+            var pathSet = new HashSet<string>(
+                assetPaths.Where(p => !string.IsNullOrWhiteSpace(p)).Select(p => p.Trim()),
+                StringComparer.OrdinalIgnoreCase);
+            if (pathSet.Count == 0)
+            {
+                return true;
+            }
+
+            var toStage = assetInfos
+                .Where(a => a != null && !a.IsHeader && pathSet.Contains(a.AssetPath))
+                .ToList();
+
+            var requestsByRoot = new Dictionary<string, List<GitUtility.GitStageRequest>>(StringComparer.OrdinalIgnoreCase);
+            var coveredPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var info in toStage)
+            {
+                coveredPaths.Add(info.AssetPath);
+                if (GitUtility.TryGetGitRelativePath(info.AssetPath, out var root, out var gitPath))
+                {
+                    if (!requestsByRoot.TryGetValue(root, out var list))
+                    {
+                        list = new List<GitUtility.GitStageRequest>();
+                        requestsByRoot[root] = list;
+                    }
+
+                    list.Add(new GitUtility.GitStageRequest(gitPath, info.ChangeType));
+                }
+
+                if (info.ChangeType == GitChangeType.Deleted &&
+                    !string.IsNullOrEmpty(info.OriginalPath) &&
+                    !string.Equals(info.OriginalPath, info.AssetPath, StringComparison.OrdinalIgnoreCase) &&
+                    GitUtility.TryGetGitRelativePath(info.OriginalPath, out var movedToRoot, out var movedToGitPath))
+                {
+                    if (!requestsByRoot.TryGetValue(movedToRoot, out var list))
+                    {
+                        list = new List<GitUtility.GitStageRequest>();
+                        requestsByRoot[movedToRoot] = list;
+                    }
+
+                    list.Add(new GitUtility.GitStageRequest(movedToGitPath, GitChangeType.Added));
+                }
+
+                if (info.ChangeType == GitChangeType.Renamed &&
+                    !string.IsNullOrEmpty(info.OriginalPath) &&
+                    !string.Equals(info.OriginalPath, info.AssetPath, StringComparison.OrdinalIgnoreCase) &&
+                    GitUtility.TryGetGitRelativePath(info.OriginalPath, out var originalRoot, out var originalGitPath))
+                {
+                    if (!requestsByRoot.TryGetValue(originalRoot, out var list))
+                    {
+                        list = new List<GitUtility.GitStageRequest>();
+                        requestsByRoot[originalRoot] = list;
+                    }
+
+                    list.Add(new GitUtility.GitStageRequest(originalGitPath, GitChangeType.Deleted));
+                }
+            }
+
+            if (pathSet.Count > coveredPaths.Count)
+            {
+                foreach (var unityPath in pathSet)
+                {
+                    if (coveredPaths.Contains(unityPath))
+                    {
+                        continue;
+                    }
+
+                    if (!GitUtility.TryGetGitRelativePath(unityPath, out var root, out var gitPath))
+                    {
+                        continue;
+                    }
+
+                    if (!requestsByRoot.TryGetValue(root, out var list))
+                    {
+                        list = new List<GitUtility.GitStageRequest>();
+                        requestsByRoot[root] = list;
+                    }
+
+                    var normalizedGitPath = gitPath.Replace('/', Path.DirectorySeparatorChar);
+                    var absolute = Path.GetFullPath(Path.Combine(root, normalizedGitPath));
+                    var exists = File.Exists(absolute) || Directory.Exists(absolute);
+                    var changeType = exists ? GitChangeType.Modified : GitChangeType.Deleted;
+                    list.Add(new GitUtility.GitStageRequest(gitPath, changeType));
+                }
+            }
+
+            var requestGroups = requestsByRoot
+                .Where(kvp => kvp.Value != null && kvp.Value.Count > 0)
+                .ToList();
+            if (requestGroups.Count == 0)
+            {
+                return true;
+            }
+
+            var summaries = new List<string>();
+            var anySucceeded = false;
+            var anyFailed = false;
+            foreach (var group in requestGroups)
+            {
+                var success = GitUtility.StageGitPaths(group.Key, group.Value, out var groupSummary);
+                anySucceeded |= success;
+                anyFailed |= !success;
+
+                if (!string.IsNullOrWhiteSpace(groupSummary))
+                {
+                    summaries.Add(requestGroups.Count == 1
+                        ? groupSummary
+                        : $"{GitUtility.GetRepositoryDisplayName(group.Key)}: {groupSummary}");
+                }
+            }
+
+            summary = string.Join("\n", summaries.Where(s => !string.IsNullOrWhiteSpace(s)));
+            return anySucceeded && !anyFailed;
+        }
+
+        private bool RunUnstageRequestsForPaths(IReadOnlyList<string> assetPaths, out string summary)
+        {
+            summary = string.Empty;
+            if (assetPaths == null || assetPaths.Count == 0)
+            {
+                return true;
+            }
+
+            var pathSet = new HashSet<string>(
+                assetPaths.Where(p => !string.IsNullOrWhiteSpace(p)).Select(p => p.Trim()),
+                StringComparer.OrdinalIgnoreCase);
+            if (pathSet.Count == 0)
+            {
+                return true;
+            }
+
+            var toUnstage = assetInfos
+                .Where(a => a != null && !a.IsHeader && pathSet.Contains(a.AssetPath))
+                .ToList();
+
+            var requestsByRoot = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            var coveredPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var info in toUnstage)
+            {
+                coveredPaths.Add(info.AssetPath);
+                if (GitUtility.TryGetGitRelativePath(info.AssetPath, out var root, out var gitPath))
+                {
+                    if (!requestsByRoot.TryGetValue(root, out var list))
+                    {
+                        list = new List<string>();
+                        requestsByRoot[root] = list;
+                    }
+
+                    list.Add(gitPath);
+                }
+
+                if (info.ChangeType == GitChangeType.Deleted &&
+                    !string.IsNullOrEmpty(info.OriginalPath) &&
+                    !string.Equals(info.OriginalPath, info.AssetPath, StringComparison.OrdinalIgnoreCase) &&
+                    GitUtility.TryGetGitRelativePath(info.OriginalPath, out var movedToRoot, out var movedToGitPath))
+                {
+                    if (!requestsByRoot.TryGetValue(movedToRoot, out var list))
+                    {
+                        list = new List<string>();
+                        requestsByRoot[movedToRoot] = list;
+                    }
+
+                    list.Add(movedToGitPath);
+                }
+
+                if (info.ChangeType == GitChangeType.Renamed &&
+                    !string.IsNullOrEmpty(info.OriginalPath) &&
+                    !string.Equals(info.OriginalPath, info.AssetPath, StringComparison.OrdinalIgnoreCase) &&
+                    GitUtility.TryGetGitRelativePath(info.OriginalPath, out var originalRoot, out var originalGitPath))
+                {
+                    if (!requestsByRoot.TryGetValue(originalRoot, out var list))
+                    {
+                        list = new List<string>();
+                        requestsByRoot[originalRoot] = list;
+                    }
+
+                    list.Add(originalGitPath);
+                }
+            }
+
+            if (pathSet.Count > coveredPaths.Count)
+            {
+                foreach (var unityPath in pathSet)
+                {
+                    if (coveredPaths.Contains(unityPath))
+                    {
+                        continue;
+                    }
+
+                    if (!GitUtility.TryGetGitRelativePath(unityPath, out var root, out var gitPath))
+                    {
+                        continue;
+                    }
+
+                    if (!requestsByRoot.TryGetValue(root, out var list))
+                    {
+                        list = new List<string>();
+                        requestsByRoot[root] = list;
+                    }
+
+                    list.Add(gitPath);
+                }
+            }
+
+            var requestGroups = requestsByRoot
+                .Where(kvp => kvp.Value != null && kvp.Value.Count > 0)
+                .Select(kvp => new KeyValuePair<string, List<string>>(
+                    kvp.Key,
+                    kvp.Value
+                        .Where(p => !string.IsNullOrWhiteSpace(p))
+                        .Select(p => p.Trim())
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToList()))
+                .Where(kvp => kvp.Value.Count > 0)
+                .ToList();
+            if (requestGroups.Count == 0)
+            {
+                return true;
+            }
+
+            var summaries = new List<string>();
+            var anySucceeded = false;
+            var anyFailed = false;
+            foreach (var group in requestGroups)
+            {
+                var success = GitUtility.UnstageGitPaths(group.Key, group.Value, out var groupSummary);
+                anySucceeded |= success;
+                anyFailed |= !success;
+
+                if (!string.IsNullOrWhiteSpace(groupSummary))
+                {
+                    summaries.Add(requestGroups.Count == 1
+                        ? groupSummary
+                        : $"{GitUtility.GetRepositoryDisplayName(group.Key)}: {groupSummary}");
+                }
+            }
+
+            summary = string.Join("\n", summaries.Where(s => !string.IsNullOrWhiteSpace(s)));
+            return anySucceeded && !anyFailed;
+        }
+
         private static void UpdateChangeTypeButtonVisual(Button button, bool enabled, Color accentColor)
         {
             if (button == null)
@@ -2641,67 +3013,10 @@ namespace TLNexus.GitU
 
             var pathSet = new HashSet<string>(assetPaths, StringComparer.OrdinalIgnoreCase);
             var toStage = assetInfos
-                .Where(a => !a.IsStaged && a.IsUnstaged && pathSet.Contains(a.AssetPath))
+                .Where(a => !a.IsHeader && !a.IsStaged && a.IsUnstaged && pathSet.Contains(a.AssetPath))
                 .ToList();
 
             if (toStage.Count == 0)
-            {
-                ShowTempNotification(isChineseUi ? "当前没有可发送的变更。" : "No changes to stage.");
-                return;
-            }
-
-            _ = GitUtility.UnityProjectFolder;
-
-            var requestsByRoot = new Dictionary<string, List<GitUtility.GitStageRequest>>(StringComparer.OrdinalIgnoreCase);
-            foreach (var info in toStage)
-            {
-                if (GitUtility.TryGetGitRelativePath(info.AssetPath, out var root, out var gitPath))
-                {
-                    if (!requestsByRoot.TryGetValue(root, out var list))
-                    {
-                        list = new List<GitUtility.GitStageRequest>();
-                        requestsByRoot[root] = list;
-                    }
-
-                    list.Add(new GitUtility.GitStageRequest(gitPath, info.ChangeType));
-                }
-
-                // If this is an explicit "Deleted (from move)" entry, stage the destination path as well
-                // so the move is staged as a whole.
-                if (info.ChangeType == GitChangeType.Deleted &&
-                    !string.IsNullOrEmpty(info.OriginalPath) &&
-                    !string.Equals(info.OriginalPath, info.AssetPath, StringComparison.OrdinalIgnoreCase) &&
-                    GitUtility.TryGetGitRelativePath(info.OriginalPath, out var movedToRoot, out var movedToGitPath))
-                {
-                    if (!requestsByRoot.TryGetValue(movedToRoot, out var list))
-                    {
-                        list = new List<GitUtility.GitStageRequest>();
-                        requestsByRoot[movedToRoot] = list;
-                    }
-
-                    list.Add(new GitUtility.GitStageRequest(movedToGitPath, GitChangeType.Added));
-                }
-
-                if (info.ChangeType == GitChangeType.Renamed &&
-                    !string.IsNullOrEmpty(info.OriginalPath) &&
-                    !string.Equals(info.OriginalPath, info.AssetPath, StringComparison.OrdinalIgnoreCase) &&
-                    GitUtility.TryGetGitRelativePath(info.OriginalPath, out var originalRoot, out var originalGitPath))
-                {
-                    if (!requestsByRoot.TryGetValue(originalRoot, out var list))
-                    {
-                        list = new List<GitUtility.GitStageRequest>();
-                        requestsByRoot[originalRoot] = list;
-                    }
-
-                    list.Add(new GitUtility.GitStageRequest(originalGitPath, GitChangeType.Deleted));
-                }
-            }
-
-            var requestGroups = requestsByRoot
-                .Where(kvp => kvp.Value != null && kvp.Value.Count > 0)
-                .ToList();
-
-            if (requestGroups.Count == 0)
             {
                 ShowTempNotification(isChineseUi ? "当前没有可发送的变更。" : "No changes to stage.");
                 return;
@@ -2715,47 +3030,10 @@ namespace TLNexus.GitU
 
             selectedUnstagedPaths.Clear();
             ApplyIncrementalMoveBetweenLists(toStage, toStaged: true);
-
-            pendingStageGitPathsByRoot = requestGroups
-                .Select(kvp => new KeyValuePair<string, List<string>>(kvp.Key, kvp.Value
-                    .Select(r => r.GitRelativePath)
-                    .Where(p => !string.IsNullOrWhiteSpace(p))
-                    .Select(p => p.Trim())
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToList()))
-                .Where(kvp => kvp.Value.Count > 0)
-                .ToDictionary(kvp => kvp.Key, kvp => kvp.Value, StringComparer.OrdinalIgnoreCase);
-
-            gitOperationInProgress = true;
-            gitOperationKind = GitOperationKind.Stage;
-            UpdateActionButtonsEnabled();
-            UpdateCommitButtonsEnabled();
-
-            statusMessage = isChineseUi ? "正在发送至待提交..." : "Sending to staged...";
+            EnqueueDeferredDragMove(toStaged: true, toStage.Select(i => i.AssetPath));
+            statusMessage = string.Empty;
             UpdateHeaderLabels();
-            ForceRepaintUI();
-
-            gitOperationTask = Task.Run(() =>
-            {
-                var summaries = new List<string>();
-                var anySucceeded = false;
-                var anyFailed = false;
-
-                foreach (var group in requestGroups)
-                {
-                    var success = GitUtility.StageGitPaths(group.Key, group.Value, out var summary);
-                    anySucceeded |= success;
-                    anyFailed |= !success;
-
-                    if (!string.IsNullOrWhiteSpace(summary))
-                    {
-                        summaries.Add(requestGroups.Count == 1 ? summary : $"{GitUtility.GetRepositoryDisplayName(group.Key)}: {summary}");
-                    }
-                }
-
-                return new GitOperationResult(anySucceeded && !anyFailed ? true : anySucceeded, string.Join("\n", summaries));
-            });
-            gitOperationTask.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
+            UpdateCommitButtonsEnabled();
         }
 
         private void UnstageSelectedStaged()
@@ -2788,73 +3066,10 @@ namespace TLNexus.GitU
 
             var pathSet = new HashSet<string>(assetPaths, StringComparer.OrdinalIgnoreCase);
             var toUnstage = assetInfos
-                .Where(a => a.IsStaged && pathSet.Contains(a.AssetPath))
+                .Where(a => !a.IsHeader && a.IsStaged && pathSet.Contains(a.AssetPath))
                 .ToList();
 
             if (toUnstage.Count == 0)
-            {
-                ShowTempNotification(isChineseUi ? "当前没有可移出的待提交项。" : "No staged items to remove.");
-                return;
-            }
-
-            _ = GitUtility.UnityProjectFolder;
-
-            var requestsByRoot = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-            foreach (var info in toUnstage)
-            {
-                if (GitUtility.TryGetGitRelativePath(info.AssetPath, out var root, out var gitPath))
-                {
-                    if (!requestsByRoot.TryGetValue(root, out var list))
-                    {
-                        list = new List<string>();
-                        requestsByRoot[root] = list;
-                    }
-
-                    list.Add(gitPath);
-                }
-
-                // If this is an explicit "Deleted (from move)" entry, unstage the destination path as well
-                // so the move is unstaged as a whole.
-                if (info.ChangeType == GitChangeType.Deleted &&
-                    !string.IsNullOrEmpty(info.OriginalPath) &&
-                    !string.Equals(info.OriginalPath, info.AssetPath, StringComparison.OrdinalIgnoreCase) &&
-                    GitUtility.TryGetGitRelativePath(info.OriginalPath, out var movedToRoot, out var movedToGitPath))
-                {
-                    if (!requestsByRoot.TryGetValue(movedToRoot, out var list))
-                    {
-                        list = new List<string>();
-                        requestsByRoot[movedToRoot] = list;
-                    }
-
-                    list.Add(movedToGitPath);
-                }
-
-                if (info.ChangeType == GitChangeType.Renamed &&
-                    !string.IsNullOrEmpty(info.OriginalPath) &&
-                    !string.Equals(info.OriginalPath, info.AssetPath, StringComparison.OrdinalIgnoreCase) &&
-                    GitUtility.TryGetGitRelativePath(info.OriginalPath, out var originalRoot, out var originalGitPath))
-                {
-                    if (!requestsByRoot.TryGetValue(originalRoot, out var list))
-                    {
-                        list = new List<string>();
-                        requestsByRoot[originalRoot] = list;
-                    }
-
-                    list.Add(originalGitPath);
-                }
-            }
-
-            var requestGroups = requestsByRoot
-                .Where(kvp => kvp.Value != null && kvp.Value.Count > 0)
-                .Select(kvp => new KeyValuePair<string, List<string>>(kvp.Key, kvp.Value
-                    .Where(p => !string.IsNullOrWhiteSpace(p))
-                    .Select(p => p.Trim())
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToList()))
-                .Where(kvp => kvp.Value.Count > 0)
-                .ToList();
-
-            if (requestGroups.Count == 0)
             {
                 ShowTempNotification(isChineseUi ? "当前没有可移出的待提交项。" : "No staged items to remove.");
                 return;
@@ -2868,46 +3083,10 @@ namespace TLNexus.GitU
 
             selectedStagedPaths.Clear();
             ApplyIncrementalMoveBetweenLists(toUnstage, toStaged: false);
-
-            pendingUnstageGitPathsByRoot = requestGroups
-                .Select(kvp => new KeyValuePair<string, List<string>>(kvp.Key, kvp.Value
-                    .Where(p => !string.IsNullOrWhiteSpace(p))
-                    .Select(p => p.Trim())
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToList()))
-                .Where(kvp => kvp.Value.Count > 0)
-                .ToDictionary(kvp => kvp.Key, kvp => kvp.Value, StringComparer.OrdinalIgnoreCase);
-
-            gitOperationInProgress = true;
-            gitOperationKind = GitOperationKind.Unstage;
-            UpdateActionButtonsEnabled();
-            UpdateCommitButtonsEnabled();
-
-            statusMessage = isChineseUi ? "正在从待提交移出..." : "Removing from staged...";
+            EnqueueDeferredDragMove(toStaged: false, toUnstage.Select(i => i.AssetPath));
+            statusMessage = string.Empty;
             UpdateHeaderLabels();
-            ForceRepaintUI();
-
-            gitOperationTask = Task.Run(() =>
-            {
-                var summaries = new List<string>();
-                var anySucceeded = false;
-                var anyFailed = false;
-
-                foreach (var group in requestGroups)
-                {
-                    var success = GitUtility.UnstageGitPaths(group.Key, group.Value, out var summary);
-                    anySucceeded |= success;
-                    anyFailed |= !success;
-
-                    if (!string.IsNullOrWhiteSpace(summary))
-                    {
-                        summaries.Add(requestGroups.Count == 1 ? summary : $"{GitUtility.GetRepositoryDisplayName(group.Key)}: {summary}");
-                    }
-                }
-
-                return new GitOperationResult(anySucceeded && !anyFailed ? true : anySucceeded, string.Join("\n", summaries));
-            });
-            gitOperationTask.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
+            UpdateCommitButtonsEnabled();
         }
 
         private void ApplyIncrementalMoveBetweenLists(List<GitAssetInfo> moved, bool toStaged)
@@ -3776,6 +3955,7 @@ namespace TLNexus.GitU
             }
 
             UpdateAssetInfosIncrementally(gitChanges);
+            ApplyDeferredMovesToAssetInfos();
             CaptureInitialStagedSnapshotIfNeeded();
 
             if (hasMultipleRepositories)
@@ -5151,11 +5331,11 @@ namespace TLNexus.GitU
                 }
             }
 
-                if (preexistingStagedCount > 0)
+            if (preexistingStagedCount > 0)
+            {
+                var breakdown = string.Empty;
+                if (hasMultipleRepositories)
                 {
-                    var breakdown = string.Empty;
-                    if (hasMultipleRepositories)
-                    {
                         var unknownRepoName = isChineseUi ? "未知" : "Unknown";
                         var stagedByRepo = assetInfos
                             .Where(a => a != null && a.IsStaged)
@@ -5184,10 +5364,11 @@ namespace TLNexus.GitU
 
                     if (!confirmed)
                     {
-                    return;
+                        return;
+                    }
                 }
-            }
 
+            var deferredMoves = ConsumeDeferredDragMoves();
             gitOperationInProgress = true;
             gitOperationKind = pushAfter ? GitOperationKind.CommitAndPush : GitOperationKind.Commit;
             UpdateActionButtonsEnabled();
@@ -5205,6 +5386,19 @@ namespace TLNexus.GitU
             var isChinese = isChineseUi;
             gitOperationTask = Task.Run(() =>
             {
+                var summaries = new List<string>();
+                var deferredMovesApplied = false;
+                if (!ApplyDeferredDragMovesBeforeCommit(deferredMoves, out var deferredSummary))
+                {
+                    return new GitOperationResult(false, deferredSummary, false, null, deferredMovesApplied: false);
+                }
+                deferredMovesApplied = true;
+
+                if (!string.IsNullOrWhiteSpace(deferredSummary))
+                {
+                    summaries.Add(deferredSummary);
+                }
+
                 var rootsToCommit = new List<string>();
                 foreach (var root in repositoryRoots)
                 {
@@ -5217,10 +5411,10 @@ namespace TLNexus.GitU
                 if (rootsToCommit.Count == 0)
                 {
                     var noStaged = isChinese ? "当前没有已暂存的变更可提交。" : "No staged changes to commit.";
-                    return new GitOperationResult(false, noStaged, false, null);
+                    summaries.Add(noStaged);
+                    return new GitOperationResult(false, string.Join("\n", summaries), false, null, deferredMovesApplied);
                 }
 
-                var summaries = new List<string>();
                 foreach (var root in rootsToCommit)
                 {
                     var repoName = GitUtility.GetRepositoryDisplayName(root);
@@ -5229,7 +5423,7 @@ namespace TLNexus.GitU
                     if (!GitUtility.CommitGit(root, normalizedMessage, isChinese, out var commitSummary))
                     {
                         var failureLines = new List<string>(summaries) { prefix + commitSummary };
-                        return new GitOperationResult(false, string.Join("\n", failureLines), false, null);
+                        return new GitOperationResult(false, string.Join("\n", failureLines), false, null, deferredMovesApplied);
                     }
 
                     summaries.Add(prefix + commitSummary);
@@ -5251,7 +5445,7 @@ namespace TLNexus.GitU
                     }
                 }
 
-                return new GitOperationResult(true, string.Join("\n", summaries), true, normalizedMessage);
+                return new GitOperationResult(true, string.Join("\n", summaries), true, normalizedMessage, deferredMovesApplied);
             });
             gitOperationTask.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
         }
@@ -6616,67 +6810,49 @@ namespace TLNexus.GitU
                 return cachedFolderIcon;
             }
 
-            var typePath = assetPath.EndsWith(".meta", StringComparison.OrdinalIgnoreCase)
+            var iconPath = assetPath.EndsWith(".meta", StringComparison.OrdinalIgnoreCase)
                 ? assetPath.Substring(0, assetPath.Length - 5)
                 : assetPath;
-
-            Type mainType = null;
-            try
-            {
-                mainType = AssetDatabase.GetMainAssetTypeAtPath(typePath);
-            }
-            catch
-            {
-                // ignored
-            }
-
-            if (mainType == null)
+            if (string.IsNullOrWhiteSpace(iconPath))
             {
                 return cachedDefaultAssetIcon;
             }
 
-            if ((mainType == typeof(Texture2D) || mainType == typeof(Sprite)) && TryGetUIImageIcon(out var uiImageIcon))
-            {
-                return uiImageIcon;
-            }
-
-            if (TypeIconCache.TryGetValue(mainType, out var cached) && cached != null)
-            {
-                return cached;
-            }
-
-            var icon = EditorGUIUtility.ObjectContent(null, mainType)?.image as Texture2D;
-            icon ??= cachedDefaultAssetIcon;
-            TypeIconCache[mainType] = icon;
-            return icon;
-        }
-
-        private static bool TryGetUIImageIcon(out Texture2D icon)
-        {
-            if (cachedUIImageIcon != null)
-            {
-                icon = cachedUIImageIcon;
-                return true;
-            }
-
+            Texture2D icon = null;
             try
             {
-                // Avoid hard dependency on UnityEngine.UI to keep GitU usable in projects without UGUI.
-                var uiImageType = Type.GetType("UnityEngine.UI.Image, UnityEngine.UI", throwOnError: false);
-                if (uiImageType != null)
-                {
-                    cachedUIImageIcon = EditorGUIUtility.ObjectContent(null, uiImageType)?.image as Texture2D;
-                }
-
-                cachedUIImageIcon ??= EditorGUIUtility.IconContent("Image Icon")?.image as Texture2D;
+                icon = AssetDatabase.GetCachedIcon(iconPath) as Texture2D;
             }
             catch
             {
                 // ignored
             }
 
-            icon = cachedUIImageIcon;
-            return icon != null;
+            if (icon != null)
+            {
+                return icon;
+            }
+
+            Type mainType = null;
+            try
+            {
+                mainType = AssetDatabase.GetMainAssetTypeAtPath(iconPath);
+            }
+            catch
+            {
+                // ignored
+            }
+
+            if (mainType != null)
+            {
+                icon = EditorGUIUtility.ObjectContent(null, mainType)?.image as Texture2D;
+                if (icon != null)
+                {
+                    return icon;
+                }
+            }
+
+            return cachedDefaultAssetIcon;
         }
 
         private static void ApplyAssetItemSelectionVisual(VisualElement item, bool selected)
@@ -7180,6 +7356,116 @@ namespace TLNexus.GitU
             return Path.Combine(libraryFolder, fileName);
         }
 
+        private void LoadDeferredDragMoves()
+        {
+            deferredDragMoveQueue.Clear();
+            var path = GetStagedAllowListFilePath(DeferredDragMovesFileName);
+            if (!File.Exists(path))
+            {
+                return;
+            }
+
+            try
+            {
+                var json = File.ReadAllText(path);
+                if (string.IsNullOrWhiteSpace(json))
+                {
+                    return;
+                }
+
+                var data = JsonUtility.FromJson<DeferredDragMoveData>(json);
+                if (data?.operations == null || data.operations.Count == 0)
+                {
+                    return;
+                }
+
+                foreach (var op in data.operations)
+                {
+                    if (op == null || op.assetPaths == null || op.assetPaths.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    var paths = op.assetPaths
+                        .Where(p => !string.IsNullOrWhiteSpace(p))
+                        .Select(p => p.Trim())
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+                    if (paths.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    deferredDragMoveQueue.Enqueue(new DeferredDragMoveRequest(op.toStaged, paths));
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning(isChineseUi
+                    ? $"GitU: 读取拖拽待同步队列失败: {ex.Message}"
+                    : $"GitU: Failed to load deferred drag-move queue: {ex.Message}");
+                deferredDragMoveQueue.Clear();
+            }
+        }
+
+        private void SaveDeferredDragMoves()
+        {
+            var path = GetStagedAllowListFilePath(DeferredDragMovesFileName);
+            try
+            {
+                var directory = Path.GetDirectoryName(path);
+                if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+                {
+                    Directory.CreateDirectory(directory);
+                }
+
+                if (deferredDragMoveQueue.Count == 0)
+                {
+                    if (File.Exists(path))
+                    {
+                        File.Delete(path);
+                    }
+
+                    return;
+                }
+
+                var data = new DeferredDragMoveData
+                {
+                    operations = deferredDragMoveQueue
+                        .Where(op => op.AssetPaths != null && op.AssetPaths.Count > 0)
+                        .Select(op => new DeferredDragMoveEntry
+                        {
+                            toStaged = op.ToStaged,
+                            assetPaths = op.AssetPaths
+                                .Where(p => !string.IsNullOrWhiteSpace(p))
+                                .Select(p => p.Trim())
+                                .Distinct(StringComparer.OrdinalIgnoreCase)
+                                .ToList()
+                        })
+                        .Where(op => op.assetPaths.Count > 0)
+                        .ToList()
+                };
+
+                if (data.operations.Count == 0)
+                {
+                    if (File.Exists(path))
+                    {
+                        File.Delete(path);
+                    }
+
+                    return;
+                }
+
+                File.WriteAllText(path, JsonUtility.ToJson(data));
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning(isChineseUi
+                    ? $"GitU: 保存拖拽待同步队列失败: {ex.Message}"
+                    : $"GitU: Failed to save deferred drag-move queue: {ex.Message}");
+            }
+        }
+
         private void LoadStagedAllowList()
         {
             stagedAllowListByRoot.Clear();
@@ -7310,6 +7596,19 @@ namespace TLNexus.GitU
         private class StagedAllowListData
         {
             public List<StagedAllowListRepoEntry> repositories = new List<StagedAllowListRepoEntry>();
+        }
+
+        [Serializable]
+        private class DeferredDragMoveEntry
+        {
+            public bool toStaged;
+            public List<string> assetPaths = new List<string>();
+        }
+
+        [Serializable]
+        private class DeferredDragMoveData
+        {
+            public List<DeferredDragMoveEntry> operations = new List<DeferredDragMoveEntry>();
         }
 
         private static void CopyToClipboard(string content)
