@@ -125,6 +125,8 @@ namespace TLNexus.GitU
         private bool gitOperationInProgress;
         private GitOperationKind gitOperationKind;
         private readonly Queue<DeferredDragMoveRequest> deferredDragMoveQueue = new Queue<DeferredDragMoveRequest>();
+        private readonly object gitOperationProgressMessageLock = new object();
+        private string pendingGitOperationProgressMessage;
 
         private readonly struct DeferredDragMoveRequest
         {
@@ -773,6 +775,8 @@ namespace TLNexus.GitU
 
         private void Update()
         {
+            ApplyQueuedGitOperationProgressMessage();
+
             if (listEnterAnimationToken > 0 &&
                 listEnterAnimationDisableTime > 0 &&
                 EditorApplication.timeSinceStartup >= listEnterAnimationDisableTime)
@@ -1206,6 +1210,60 @@ namespace TLNexus.GitU
 
             notificationEndTime = 0;
             StartToastExitAnimation();
+        }
+
+        private void QueueGitOperationProgressMessage(string message)
+        {
+            if (string.IsNullOrWhiteSpace(message))
+            {
+                return;
+            }
+
+            lock (gitOperationProgressMessageLock)
+            {
+                pendingGitOperationProgressMessage = message;
+            }
+        }
+
+        private void ClearQueuedGitOperationProgressMessage()
+        {
+            lock (gitOperationProgressMessageLock)
+            {
+                pendingGitOperationProgressMessage = null;
+            }
+        }
+
+        private void ApplyQueuedGitOperationProgressMessage()
+        {
+            string message = null;
+            lock (gitOperationProgressMessageLock)
+            {
+                if (!string.IsNullOrWhiteSpace(pendingGitOperationProgressMessage))
+                {
+                    message = pendingGitOperationProgressMessage;
+                    pendingGitOperationProgressMessage = null;
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(message))
+            {
+                return;
+            }
+
+            statusMessage = message;
+            UpdateHeaderLabels();
+
+            if (toastLabel != null && toastLabel.style.display.value != DisplayStyle.None)
+            {
+                toastLabel.text = message;
+                notificationEndTime = EditorApplication.timeSinceStartup + 9999f;
+            }
+            else
+            {
+                ShowTempNotification(message, 9999f);
+            }
+
+            ForceRepaintUI();
         }
 
         private void StartToastEnterAnimation()
@@ -1827,6 +1885,7 @@ namespace TLNexus.GitU
 
             gitOperationTask = null;
             gitOperationKind = GitOperationKind.None;
+            ClearQueuedGitOperationProgressMessage();
 
             gitOperationInProgress = false;
             UpdateActionButtonsEnabled();
@@ -5336,37 +5395,37 @@ namespace TLNexus.GitU
                 var breakdown = string.Empty;
                 if (hasMultipleRepositories)
                 {
-                        var unknownRepoName = isChineseUi ? "未知" : "Unknown";
-                        var stagedByRepo = assetInfos
-                            .Where(a => a != null && a.IsStaged)
-                            .GroupBy(a =>
-                            {
-                                var name = GitUtility.GetRepositoryDisplayName(a.RepoRoot);
-                                return string.IsNullOrWhiteSpace(name) ? unknownRepoName : name;
-                            })
-                            .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
-                            .Select(g => $"- {g.Key}: {g.Count()}")
-                            .ToList();
-
-                        if (stagedByRepo.Count > 0)
+                    var unknownRepoName = isChineseUi ? "未知" : "Unknown";
+                    var stagedByRepo = assetInfos
+                        .Where(a => a != null && a.IsStaged)
+                        .GroupBy(a =>
                         {
-                            breakdown = "\n\n" + string.Join("\n", stagedByRepo);
-                        }
-                    }
+                            var name = GitUtility.GetRepositoryDisplayName(a.RepoRoot);
+                            return string.IsNullOrWhiteSpace(name) ? unknownRepoName : name;
+                        })
+                        .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+                        .Select(g => $"- {g.Key}: {g.Count()}")
+                        .ToList();
 
-                    var confirmed = EditorUtility.DisplayDialog(
-                        isChineseUi ? "安全确认" : "Confirm",
-                        isChineseUi
-                            ? $"将提交 {stagedPathsNow.Count} 个待提交条目。{breakdown}\n\n是否继续提交？"
-                            : $"You are about to commit {stagedPathsNow.Count} staged items.{breakdown}\n\nContinue?",
-                        isChineseUi ? "继续提交" : "Commit",
-                        isChineseUi ? "取消" : "Cancel");
-
-                    if (!confirmed)
+                    if (stagedByRepo.Count > 0)
                     {
-                        return;
+                        breakdown = "\n\n" + string.Join("\n", stagedByRepo);
                     }
                 }
+
+                var confirmed = EditorUtility.DisplayDialog(
+                    isChineseUi ? "安全确认" : "Confirm",
+                    isChineseUi
+                        ? $"将提交 {stagedPathsNow.Count} 个待提交条目。{breakdown}\n\n是否继续提交？"
+                        : $"You are about to commit {stagedPathsNow.Count} staged items.{breakdown}\n\nContinue?",
+                    isChineseUi ? "继续提交" : "Commit",
+                    isChineseUi ? "取消" : "Cancel");
+
+                if (!confirmed)
+                {
+                    return;
+                }
+            }
 
             var deferredMoves = ConsumeDeferredDragMoves();
             gitOperationInProgress = true;
@@ -5374,12 +5433,9 @@ namespace TLNexus.GitU
             UpdateActionButtonsEnabled();
             UpdateCommitButtonsEnabled();
 
-            statusMessage = pushAfter
-                ? (isChineseUi ? "正在提交并推送..." : "Committing & pushing...")
-                : (isChineseUi ? "正在提交..." : "Committing...");
+            ClearQueuedGitOperationProgressMessage();
+            statusMessage = isChineseUi ? "同步 Git 中..." : "Syncing Git...";
             UpdateHeaderLabels();
-            // 在中间显示长期的提示条（替代底部 statusLabel 的进行中提示）
-            // 使用较长的超时时间，完成后由 PollGitOperationTask 隐藏或替换为结果提示。
             ShowTempNotification(statusMessage, 9999f);
             ForceRepaintUI();
 
@@ -5388,6 +5444,8 @@ namespace TLNexus.GitU
             {
                 var summaries = new List<string>();
                 var deferredMovesApplied = false;
+                QueueGitOperationProgressMessage(isChinese ? "同步 Git 中..." : "Syncing Git...");
+
                 if (!ApplyDeferredDragMovesBeforeCommit(deferredMoves, out var deferredSummary))
                 {
                     return new GitOperationResult(false, deferredSummary, false, null, deferredMovesApplied: false);
@@ -5415,10 +5473,18 @@ namespace TLNexus.GitU
                     return new GitOperationResult(false, string.Join("\n", summaries), false, null, deferredMovesApplied);
                 }
 
-                foreach (var root in rootsToCommit)
+                for (var index = 0; index < rootsToCommit.Count; index++)
                 {
+                    var root = rootsToCommit[index];
                     var repoName = GitUtility.GetRepositoryDisplayName(root);
+                    var displayRepoName = string.IsNullOrWhiteSpace(repoName) ? (isChinese ? "未知仓库" : "Unknown repo") : repoName;
                     var prefix = rootsToCommit.Count == 1 || string.IsNullOrWhiteSpace(repoName) ? string.Empty : $"{repoName}: ";
+                    var commitPhase = rootsToCommit.Count > 1
+                        ? (isChinese
+                            ? $"正在提交（{index + 1}/{rootsToCommit.Count}）：{displayRepoName}..."
+                            : $"Committing ({index + 1}/{rootsToCommit.Count}): {displayRepoName}...")
+                        : (isChinese ? "正在提交..." : "Committing...");
+                    QueueGitOperationProgressMessage(commitPhase);
 
                     if (!GitUtility.CommitGit(root, normalizedMessage, isChinese, out var commitSummary))
                     {
@@ -5430,6 +5496,13 @@ namespace TLNexus.GitU
 
                     if (pushAfter)
                     {
+                        var pushPhase = rootsToCommit.Count > 1
+                            ? (isChinese
+                                ? $"正在推送（{index + 1}/{rootsToCommit.Count}）：{displayRepoName}..."
+                                : $"Pushing ({index + 1}/{rootsToCommit.Count}): {displayRepoName}...")
+                            : (isChinese ? "正在推送..." : "Pushing...");
+                        QueueGitOperationProgressMessage(pushPhase);
+
                         if (GitUtility.PushGit(root, isChinese, out var pushSummary))
                         {
                             summaries.Add(prefix + pushSummary);
