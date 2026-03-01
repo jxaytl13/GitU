@@ -5376,57 +5376,6 @@ namespace TLNexus.GitU
                 return;
             }
 
-            CaptureInitialStagedSnapshotIfNeeded();
-            var stagedPathsNow = assetInfos.Where(a => a.IsStaged).Select(a => a.AssetPath).ToList();
-            var preexistingStagedCount = 0;
-            if (initialStagedPaths != null && stagedPathsNow.Count > 0)
-            {
-                foreach (var path in stagedPathsNow)
-                {
-                    if (initialStagedPaths.Contains(path))
-                    {
-                        preexistingStagedCount++;
-                    }
-                }
-            }
-
-            if (preexistingStagedCount > 0)
-            {
-                var breakdown = string.Empty;
-                if (hasMultipleRepositories)
-                {
-                    var unknownRepoName = isChineseUi ? "未知" : "Unknown";
-                    var stagedByRepo = assetInfos
-                        .Where(a => a != null && a.IsStaged)
-                        .GroupBy(a =>
-                        {
-                            var name = GitUtility.GetRepositoryDisplayName(a.RepoRoot);
-                            return string.IsNullOrWhiteSpace(name) ? unknownRepoName : name;
-                        })
-                        .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
-                        .Select(g => $"- {g.Key}: {g.Count()}")
-                        .ToList();
-
-                    if (stagedByRepo.Count > 0)
-                    {
-                        breakdown = "\n\n" + string.Join("\n", stagedByRepo);
-                    }
-                }
-
-                var confirmed = EditorUtility.DisplayDialog(
-                    isChineseUi ? "安全确认" : "Confirm",
-                    isChineseUi
-                        ? $"将提交 {stagedPathsNow.Count} 个待提交条目。{breakdown}\n\n是否继续提交？"
-                        : $"You are about to commit {stagedPathsNow.Count} staged items.{breakdown}\n\nContinue?",
-                    isChineseUi ? "继续提交" : "Commit",
-                    isChineseUi ? "取消" : "Cancel");
-
-                if (!confirmed)
-                {
-                    return;
-                }
-            }
-
             var deferredMoves = ConsumeDeferredDragMoves();
             gitOperationInProgress = true;
             gitOperationKind = pushAfter ? GitOperationKind.CommitAndPush : GitOperationKind.Commit;
@@ -6181,12 +6130,6 @@ namespace TLNexus.GitU
                     }
                     else
                     {
-                        if (thisSet.Count > 1)
-                        {
-                            thisSet.Clear();
-                            thisSet.Add(pointerDownInfo.AssetPath);
-                        }
-
                         if (stagedView)
                         {
                             stagedSelectionAnchorIndex = refs.BoundIndex;
