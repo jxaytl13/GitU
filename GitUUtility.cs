@@ -69,6 +69,7 @@ namespace TLNexus.GitU
         Texture,
         VideoClip,
         VisualEffectAsset,
+        Folder,
         Unknown
     }
 
@@ -97,6 +98,7 @@ namespace TLNexus.GitU
                 UnityAssetTypeFilter.Texture => "Texture",
                 UnityAssetTypeFilter.VideoClip => "Video Clip",
                 UnityAssetTypeFilter.VisualEffectAsset => "Visual Effect Asset",
+                UnityAssetTypeFilter.Folder => "Folder",
                 _ => "Unknown"
             };
         }
@@ -236,6 +238,11 @@ namespace TLNexus.GitU
             }
 
             var extension = Path.GetExtension(path)?.ToLowerInvariant() ?? string.Empty;
+            if (AssetDatabase.IsValidFolder(path))
+            {
+                return UnityAssetTypeFilter.Folder;
+            }
+
             switch (extension)
             {
                 case ".anim":
