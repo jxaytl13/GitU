@@ -3655,7 +3655,8 @@ namespace TLNexus.GitU
             UnityAssetTypeFilter.Sprite,
             UnityAssetTypeFilter.Texture,
             UnityAssetTypeFilter.VideoClip,
-            UnityAssetTypeFilter.VisualEffectAsset
+            UnityAssetTypeFilter.VisualEffectAsset,
+            UnityAssetTypeFilter.Folder
         };
 
         private void ConfigureAssetTypeMenu()
